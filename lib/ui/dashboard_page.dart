@@ -89,7 +89,7 @@ class _DashboardPageState extends State<DashboardPage> {
       - Do not include any conversational intro or outro text.
       """;
 
-      final groqApiKey = dotenv.env['GROQ_API_KEY']?.trim() ?? '';
+      const groqApiKey = String.fromEnvironment('GROQ_API_KEY');
 
       if (groqApiKey.isEmpty) {
         if (!mounted) return;
