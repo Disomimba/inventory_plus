@@ -2,20 +2,20 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'ui/login_page.dart';
 import 'ui/main_screen.dart'; 
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'logic/inventory_controller.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  try {
-    await dotenv.load(fileName: "lib/.env");
-
-    await Supabase.initialize(
-      url: dotenv.env['SUPABASE_URL']!,
-      anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
-    );
+try {
+      // We removed dotenv.load entirely.
+      
+      // Use const String.fromEnvironment to read Vercel's injected keys
+      await Supabase.initialize(
+        url: const String.fromEnvironment('SUPABASE_URL'),
+        anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+      );
   } catch (e) {
     print("Initialization Error: $e");
   }
