@@ -593,7 +593,7 @@ class InventoryController {
     }
   }
 
-  Future<void> createCustomerOrder(List<CustomerOrderItem> items) async {
+  Future<void> createCustomerOrder(List<CustomerOrderItem> items, {required double totalAmount,required double discountAmount}) async {
     final locId = activeLocationId;
 
     if (locId == null) {
@@ -604,6 +604,8 @@ class InventoryController {
       await supabase.from('orders').insert({
         'location_id': locId,
         'status': 'pending',
+        'total_amount': totalAmount,
+        'discount_amount': discountAmount,
         'items': items.map((i) => i.toJson()).toList(),
         'created_by': currentUserNumericId,
       }).select();
@@ -621,8 +623,7 @@ class InventoryController {
       }
     } catch (e) {}
   }
-
-  Stream<List<CustomerOrder>> streamOrders() {
+Stream<List<CustomerOrder>> streamOrders() {
     final locId = activeLocationId;
     if (locId == null) return Stream.value([]);
 
@@ -633,7 +634,7 @@ class InventoryController {
         .order('created_at', ascending: false)
         .map(
           (list) =>
-              list.map((item) => CustomerOrder.fromSupabase(item)).toList(),
+              list.map((item) => CustomerOrder.fromJson(item)).toList(),
         );
   }
 

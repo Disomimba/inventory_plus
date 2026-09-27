@@ -20,7 +20,8 @@ class PosCartPage extends StatefulWidget {
   State<PosCartPage> createState() => _PosCartPageState();
 }
 
-class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStateMixin {
+class _PosCartPageState extends State<PosCartPage>
+    with SingleTickerProviderStateMixin {
   String _searchQuery = '';
   String _selectedCategory = 'All';
   final Map<String, double> _cart = {};
@@ -64,14 +65,15 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
 
   void _snapTo(double target) {
     final start = _cartHeightFraction;
-    _snapAnimation = Tween<double>(begin: start, end: target).animate(
-      CurvedAnimation(
-        parent: _snapAnim,
-        curve: const Cubic(0.25, 0.46, 0.45, 0.94), 
-      ),
-    )..addListener(() {
-        setState(() => _cartHeightFraction = _snapAnimation.value);
-      });
+    _snapAnimation =
+        Tween<double>(begin: start, end: target).animate(
+          CurvedAnimation(
+            parent: _snapAnim,
+            curve: const Cubic(0.25, 0.46, 0.45, 0.94),
+          ),
+        )..addListener(() {
+          setState(() => _cartHeightFraction = _snapAnimation.value);
+        });
     _snapAnim
       ..reset()
       ..forward();
@@ -95,7 +97,8 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
     } else if (velocity > 800) {
       target = floorFraction;
     } else {
-      target = (_cartHeightFraction - floorFraction).abs() <
+      target =
+          (_cartHeightFraction - floorFraction).abs() <
               (_cartHeightFraction - safeMax).abs()
           ? floorFraction
           : safeMax;
@@ -104,8 +107,8 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
   }
 
   List<InventoryItem> get _filteredItems => widget.controller.filterInventory(
-    query: _searchQuery, 
-    category: _selectedCategory
+    query: _searchQuery,
+    category: _selectedCategory,
   );
 
   bool _addToCart(InventoryItem item) {
@@ -114,7 +117,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
     if (currentQty >= item.quantity) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Cannot add more of ${item.name}. Stock limit reached.'),
+          content: Text(
+            'Cannot add more of ${item.name}. Stock limit reached.',
+          ),
           backgroundColor: Colors.orange,
         ),
       );
@@ -131,7 +136,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
       if (qty > item.quantity) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Cannot set quantity to $qty. Only ${item.quantity} in stock.'),
+            content: Text(
+              'Cannot set quantity to $qty. Only ${item.quantity} in stock.',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -145,7 +152,7 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
       } else {
         _cart[itemId] = qty;
       }
-      
+
       if (_cart.isEmpty) {
         _discountValue = 0.0;
         _discountReason = '';
@@ -167,8 +174,17 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
           quantity: entry.value,
         );
       }).toList();
-
-      await widget.controller.createCustomerOrder(items);
+      double subtotal = _calculateTotal();
+      double discountAmt = _isDiscountPercentage
+          ? (subtotal * (_discountValue / 100))
+          : _discountValue;
+      if (discountAmt > subtotal) discountAmt = subtotal; // Cap discount
+      double totalDue = subtotal - discountAmt;
+await widget.controller.createCustomerOrder(
+        items, 
+        totalAmount: totalDue, 
+        discountAmount: discountAmt, // <-- Pass the discount to be saved
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -192,7 +208,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
     double total = 0;
     for (var entry in _cart.entries) {
       try {
-        final item = widget.controller.allItems.firstWhere((i) => i.id == entry.key);
+        final item = widget.controller.allItems.firstWhere(
+          (i) => i.id == entry.key,
+        );
         total += item.price * entry.value;
       } catch (_) {}
     }
@@ -201,11 +219,11 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
 
   void _showDiscountDialog(BuildContext context) {
     final valueCtrl = TextEditingController(
-      text: _discountValue > 0 
-          ? (_discountValue.truncateToDouble() == _discountValue 
-              ? _discountValue.toInt().toString() 
-              : _discountValue.toStringAsFixed(2)) 
-          : ''
+      text: _discountValue > 0
+          ? (_discountValue.truncateToDouble() == _discountValue
+                ? _discountValue.toInt().toString()
+                : _discountValue.toStringAsFixed(2))
+          : '',
     );
     final reasonCtrl = TextEditingController(text: _discountReason);
     bool isPercent = _isDiscountPercentage;
@@ -215,10 +233,12 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setModalState) {
           return Dialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             backgroundColor: Colors.white,
             child: SizedBox(
-              width: 340, 
+              width: 340,
               child: Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
@@ -228,9 +248,20 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text("Add Discount", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                        const Text(
+                          "Add Discount",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
                         IconButton(
-                          icon: const Icon(LucideIcons.x, size: 20, color: Colors.grey),
+                          icon: const Icon(
+                            LucideIcons.x,
+                            size: 20,
+                            color: Colors.grey,
+                          ),
                           onPressed: () => Navigator.pop(dialogContext),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
@@ -248,32 +279,80 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                         children: [
                           Expanded(
                             child: GestureDetector(
-                              onTap: () => setModalState(() => isPercent = true),
+                              onTap: () =>
+                                  setModalState(() => isPercent = true),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: isPercent ? Colors.white : Colors.transparent,
+                                  color: isPercent
+                                      ? Colors.white
+                                      : Colors.transparent,
                                   borderRadius: BorderRadius.circular(6),
-                                  boxShadow: isPercent ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)] : [],
+                                  boxShadow: isPercent
+                                      ? [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(
+                                              0.05,
+                                            ),
+                                            blurRadius: 4,
+                                          ),
+                                        ]
+                                      : [],
                                 ),
                                 child: Center(
-                                  child: Text("Percent %", style: TextStyle(fontWeight: isPercent ? FontWeight.bold : FontWeight.normal, color: isPercent ? Colors.black87 : Colors.grey)),
+                                  child: Text(
+                                    "Percent %",
+                                    style: TextStyle(
+                                      fontWeight: isPercent
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      color: isPercent
+                                          ? Colors.black87
+                                          : Colors.grey,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                           Expanded(
                             child: GestureDetector(
-                              onTap: () => setModalState(() => isPercent = false),
+                              onTap: () =>
+                                  setModalState(() => isPercent = false),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: !isPercent ? Colors.white : Colors.transparent,
+                                  color: !isPercent
+                                      ? Colors.white
+                                      : Colors.transparent,
                                   borderRadius: BorderRadius.circular(6),
-                                  boxShadow: !isPercent ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)] : [],
+                                  boxShadow: !isPercent
+                                      ? [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(
+                                              0.05,
+                                            ),
+                                            blurRadius: 4,
+                                          ),
+                                        ]
+                                      : [],
                                 ),
                                 child: Center(
-                                  child: Text("Amount ₱", style: TextStyle(fontWeight: !isPercent ? FontWeight.bold : FontWeight.normal, color: !isPercent ? Colors.black87 : Colors.grey)),
+                                  child: Text(
+                                    "Amount ₱",
+                                    style: TextStyle(
+                                      fontWeight: !isPercent
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      color: !isPercent
+                                          ? Colors.black87
+                                          : Colors.grey,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -284,15 +363,33 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                     const SizedBox(height: 16),
                     TextField(
                       controller: valueCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       style: const TextStyle(fontWeight: FontWeight.bold),
                       decoration: InputDecoration(
                         prefixText: isPercent ? "" : "₱ ",
-                        prefixStyle: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
-                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
-                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.orange)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        prefixStyle: const TextStyle(
+                          color: Colors.orange,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Colors.orange),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -304,8 +401,14 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                         hintStyle: TextStyle(color: Colors.grey.shade400),
                         filled: true,
                         fillColor: const Color(0xFF374151),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -315,7 +418,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.orange,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                           elevation: 0,
                         ),
                         onPressed: () {
@@ -327,8 +432,365 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                           });
                           Navigator.pop(dialogContext);
                         },
-                        child: const Text("Apply Discount", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                        child: const Text(
+                          "Apply Discount",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
                       ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<bool?> _showPaymentDialog({
+    required double subtotal,
+    required double discountAmt,
+    required double totalDue,
+    required int itemsCount,
+    required double totalQty,
+  }) {
+    String paymentMode = 'Cash';
+    final cashCtrl = TextEditingController();
+    double cashReceived = 0.0;
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          double change = cashReceived - totalDue;
+          if (change < 0) change = 0;
+
+          Widget buildPaymentTile(String title, IconData icon) {
+            bool isSelected = paymentMode == title;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => setDialogState(() => paymentMode = title),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.orange.shade50 : Colors.white,
+                    border: Border.all(
+                      color: isSelected ? Colors.orange : Colors.grey.shade300,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(
+                        icon,
+                        color: isSelected
+                            ? Colors.orange
+                            : Colors.grey.shade400,
+                        size: 20,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: isSelected
+                              ? Colors.orange
+                              : Colors.grey.shade600,
+                          fontSize: 12,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+
+          String qtyStr = totalQty.truncateToDouble() == totalQty
+              ? totalQty.toInt().toString()
+              : totalQty.toStringAsFixed(2);
+
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            backgroundColor: Colors.white,
+            child: SizedBox(
+              width: 400,
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Confirm Order",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "$itemsCount items - $qtyStr total qty",
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade200),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Subtotal',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            Text(
+                              '₱${subtotal.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                        
+                        // Only show the discount row if a discount was applied
+                        if (discountAmt > 0) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Discount', style: TextStyle(fontSize: 12)),
+                              Text(
+                                "-₱${discountAmt.toStringAsFixed(2)}",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'TOTAL',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                              ),
+                            ),
+                            Text(
+                              // Use the actual totalAmount from the database
+                              "₱${totalDue.toStringAsFixed(2)}",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+                    Text(
+                      "MODE OF PAYMENT",
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey.shade500,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        buildPaymentTile('Cash', LucideIcons.banknote),
+                        const SizedBox(width: 8),
+                        buildPaymentTile('GCash', LucideIcons.smartphone),
+                        const SizedBox(width: 8),
+                        buildPaymentTile('Card', LucideIcons.creditCard),
+                      ],
+                    ),
+
+                    if (paymentMode == 'Cash') ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          const Text(
+                            "Cash Received",
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextField(
+                              controller: cashCtrl,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                              decoration: InputDecoration(
+                                filled: true,
+                                fillColor: const Color(0xFF374151),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  borderSide: BorderSide.none,
+                                ),
+                                isDense: true,
+                              ),
+                              onChanged: (val) {
+                                setDialogState(() {
+                                  cashReceived = double.tryParse(val) ?? 0.0;
+                                });
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "Change",
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
+                          ),
+                          Text(
+                            "₱${change.toStringAsFixed(2)}",
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        const Icon(
+                          LucideIcons.check,
+                          color: Colors.green,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Payment is received',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(
+                          LucideIcons.check,
+                          color: Colors.green,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Receipt will be generated',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.black87,
+                              side: BorderSide(color: Colors.grey.shade300),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                            child: const Text("Cancel"),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed:
+                                (paymentMode == 'Cash' &&
+                                    cashReceived < totalDue)
+                                ? null
+                                : () => Navigator.pop(context, true),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              disabledBackgroundColor: Colors.green.shade200,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              elevation: 0,
+                            ),
+                            child: const Text(
+                              "Confirm",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -344,23 +806,25 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
   void _showReceiptDialog(CustomerOrder o) {
     double subtotal = 0;
     List<Widget> itemRows = [];
-    
+
     for (var item in o.items) {
       double price = 0;
       String unit = 'pcs';
       try {
-        final dbItem = widget.controller.allItems.firstWhere((i) => i.id == item.productId);
+        final dbItem = widget.controller.allItems.firstWhere(
+          (i) => i.id == item.productId,
+        );
         price = dbItem.price;
         unit = dbItem.unit;
       } catch (_) {}
-      
+
       double itemTotal = price * item.quantity;
       subtotal += itemTotal;
-      
-      String qtyStr = item.quantity.truncateToDouble() == item.quantity 
-          ? item.quantity.toInt().toString() 
+
+      String qtyStr = item.quantity.truncateToDouble() == item.quantity
+          ? item.quantity.toInt().toString()
           : item.quantity.toStringAsFixed(2);
-      
+
       itemRows.add(
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -372,12 +836,27 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(item.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                    Text('$qtyStr $unit x ₱${price.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                    Text(
+                      item.productName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                    Text(
+                      '$qtyStr $unit x ₱${price.toStringAsFixed(2)}',
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
                   ],
-                )
+                ),
               ),
-              Text('₱${itemTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text(
+                '₱${itemTotal.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
             ],
           ),
         ),
@@ -385,11 +864,25 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
     }
 
     DateTime now = DateTime.now();
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     String ampm = now.hour >= 12 ? 'PM' : 'AM';
     int hr = now.hour > 12 ? now.hour - 12 : (now.hour == 0 ? 12 : now.hour);
     String min = now.minute.toString().padLeft(2, '0');
-    String dateStr = '${months[now.month - 1]} ${now.day}, ${now.year} $hr:$min $ampm';
+    String dateStr =
+        '${months[now.month - 1]} ${now.day}, ${now.year} $hr:$min $ampm';
     String cashierName = widget.controller.currentUserName ?? "Admin";
 
     showDialog(
@@ -409,22 +902,44 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 decoration: BoxDecoration(
                   color: Colors.green.shade50,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(16),
+                  ),
                 ),
                 child: Column(
                   children: [
                     Container(
                       padding: const EdgeInsets.all(12),
-                      decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
-                      child: const Icon(LucideIcons.check, color: Colors.white, size: 32),
+                      decoration: const BoxDecoration(
+                        color: Colors.green,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        LucideIcons.check,
+                        color: Colors.white,
+                        size: 32,
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    const Text('Order Completed', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    Text('Transaction #${o.id.substring(0, 8).toUpperCase()}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                    const Text(
+                      'Order Completed',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      'Transaction #${o.id.substring(0, 8).toUpperCase()}',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 12,
+                      ),
+                    ),
                   ],
                 ),
               ),
-              
+
               // Body - WRAPPED IN FLEXIBLE AND SINGLECHILDSCROLLVIEW TO FIX OVERFLOW
               Flexible(
                 child: SingleChildScrollView(
@@ -433,33 +948,82 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text('INVENTORY PLUS', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.5)),
+                        const Text(
+                          'INVENTORY PLUS',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
                         const SizedBox(height: 4),
-                        Text('Hardware & Tools - Biñan, Laguna', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+                        Text(
+                          'Hardware & Tools - Biñan, Laguna',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 11,
+                          ),
+                        ),
                         const SizedBox(height: 16),
                         const _DashedDivider(),
                         const SizedBox(height: 16),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Order #', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
-                            Text(o.id.substring(0, 8).toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                            Text(
+                              'Order #',
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 11,
+                              ),
+                            ),
+                            Text(
+                              o.id.substring(0, 8).toUpperCase(),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Date', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
-                            Text(dateStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                            Text(
+                              'Date',
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 11,
+                              ),
+                            ),
+                            Text(
+                              dateStr,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Cashier', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
-                            Text(cashierName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                            Text(
+                              'Cashier',
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 11,
+                              ),
+                            ),
+                            Text(
+                              cashierName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 16),
@@ -472,56 +1036,122 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Subtotal', style: TextStyle(fontSize: 12)),
-                            Text('₱${subtotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            const Text(
+                              'Subtotal',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            Text(
+                              '₱${subtotal.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        const Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Discount', style: TextStyle(fontSize: 12)),
-                            Text('-₱0.00', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                          ],
-                        ),
+                        
+                        // Only show the discount row if a discount was applied
+                        if (o.discountAmount > 0) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Discount', style: TextStyle(fontSize: 12)),
+                              Text(
+                                '-₱${o.discountAmount.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        
                         const SizedBox(height: 12),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('TOTAL', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
-                            Text('₱${subtotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+                            const Text(
+                              'TOTAL',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                              ),
+                            ),
+                            Text(
+                              // Use the actual totalAmount from the database here
+                              '₱${o.totalAmount.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 24),
-                        Text('Thank you for your purchase!', style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontStyle: FontStyle.italic)),
-                        Text('This serves as your official receipt.', style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontStyle: FontStyle.italic)),
+                        Text(
+                          'Thank you for your purchase!',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                        Text(
+                          'This serves as your official receipt.',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
               ),
-              
+
               // Footer buttons - Stay pinned to the bottom
               Padding(
-                padding: const EdgeInsets.only(left: 24, right: 24, bottom: 24, top: 12),
+                padding: const EdgeInsets.only(
+                  left: 24,
+                  right: 24,
+                  bottom: 24,
+                  top: 12,
+                ),
                 child: Row(
                   children: [
                     Expanded(
-  child: ElevatedButton.icon(
-    onPressed: () {
-      Navigator.pop(context); // Closes the current receipt dialog
-      _showQRModal(o.id);     // Opens the new QR modal
-    },
-    icon: const Icon(LucideIcons.qrCode, color: Colors.white, size: 16),
-    label: const Text('QR Receipt', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-    style: ElevatedButton.styleFrom(
-      backgroundColor: const Color(0xFF0F172A),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      elevation: 0,
-    ),
-  ),
-),
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(
+                            context,
+                          ); // Closes the current receipt dialog
+                          _showQRModal(o.id); // Opens the new QR modal
+                        },
+                        icon: const Icon(
+                          LucideIcons.qrCode,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                        label: const Text(
+                          'QR Receipt',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F172A),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          elevation: 0,
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton(
@@ -529,98 +1159,125 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.black87,
                           side: BorderSide(color: Colors.grey.shade300),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
-                        child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Done',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
                   ],
                 ),
-              )
+              ),
             ],
           ),
         ),
       ),
     );
   }
-  void _showQRModal(String orderId) {
-  // Your live Netlify URL with the order ID parameter attached
-  final String publicReceiptUrl = "https://inventoryplusreceipt.netlify.app/?id=$orderId";
 
-  showDialog(
-    context: context,
-    builder: (context) => Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      backgroundColor: Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("Scan Digital Receipt", 
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            
-            // Warning Banner
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF3CD),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFFFEEBA))
+  void _showQRModal(String orderId) {
+    // Your live Netlify URL with the order ID parameter attached
+    final String publicReceiptUrl =
+        "https://inventoryplusreceipt.netlify.app/?id=$orderId";
+
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Scan Digital Receipt",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-              child: const Text(
-                "⚠️ This receipt will expire in 48 hours. Ask customer to screenshot.",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Color(0xFF856404), fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-            ),
-            const SizedBox(height: 24),
-            
-            // QR Code Generator
-            QrImageView(
-              data: publicReceiptUrl,
-              version: QrVersions.auto,
-              size: 200.0,
-              backgroundColor: Colors.white,
-            ),
-            
-            const SizedBox(height: 16),
-            Text("Order #${orderId.substring(0, 8).toUpperCase()}", 
-                style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
-            
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              const SizedBox(height: 16),
+
+              // Warning Banner
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3CD),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFFEEBA)),
                 ),
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Close", 
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                child: const Text(
+                  "⚠️ This receipt will expire in 48 hours. Ask customer to screenshot.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF856404),
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-            )
-          ],
+              const SizedBox(height: 24),
+
+              // QR Code Generator
+              QrImageView(
+                data: publicReceiptUrl,
+                version: QrVersions.auto,
+                size: 200.0,
+                backgroundColor: Colors.white,
+              ),
+
+              const SizedBox(height: 16),
+              Text(
+                "Order #${orderId.substring(0, 8).toUpperCase()}",
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    "Close",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   void _showPendingOrdersModal(BuildContext context) {
     showDialog(
       context: context,
       builder: (dialogContext) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           backgroundColor: Colors.white,
           child: Container(
-            width: 480, 
+            width: 480,
             constraints: BoxConstraints(
               maxHeight: MediaQuery.of(context).size.height * 0.8,
             ),
@@ -635,7 +1292,11 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                     children: [
                       const Text(
                         'Pending Orders',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F172A),
+                        ),
                       ),
                       Container(
                         decoration: BoxDecoration(
@@ -643,7 +1304,11 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: IconButton(
-                          icon: const Icon(LucideIcons.x, size: 18, color: Colors.grey),
+                          icon: const Icon(
+                            LucideIcons.x,
+                            size: 18,
+                            color: Colors.grey,
+                          ),
                           onPressed: () => Navigator.pop(dialogContext),
                           padding: const EdgeInsets.all(8),
                           constraints: const BoxConstraints(),
@@ -658,12 +1323,19 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                     stream: widget.controller.streamOrders(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator(color: Colors.orange));
+                        return const Center(
+                          child: CircularProgressIndicator(
+                            color: Colors.orange,
+                          ),
+                        );
                       }
                       final pendingOrders = snapshot.data!
-                          .where((o) => o.status == 'prepared' || o.status == 'pending')
+                          .where(
+                            (o) =>
+                                o.status == 'prepared' || o.status == 'pending',
+                          )
                           .toList();
-                          
+
                       if (pendingOrders.isEmpty) {
                         return const Center(
                           child: Text(
@@ -679,9 +1351,15 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                         itemBuilder: (context, index) {
                           final o = pendingOrders[index];
                           final isReady = o.status == 'prepared';
-                          final mainColor = isReady ? Colors.green : Colors.orange;
-                          final bgColor = isReady ? Colors.green.shade50 : Colors.orange.shade50;
-                          final iconData = isReady ? LucideIcons.check : LucideIcons.clock;
+                          final mainColor = isReady
+                              ? Colors.green
+                              : Colors.orange;
+                          final bgColor = isReady
+                              ? Colors.green.shade50
+                              : Colors.orange.shade50;
+                          final iconData = isReady
+                              ? LucideIcons.check
+                              : LucideIcons.clock;
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 16),
@@ -694,74 +1372,116 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                   color: Colors.black.withOpacity(0.03),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
-                                )
-                              ]
+                                ),
+                              ],
                             ),
                             clipBehavior: Clip.antiAlias,
                             child: IntrinsicHeight(
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  Container(
-                                    width: 6,
-                                    color: mainColor,
-                                  ),
+                                  Container(width: 6, color: mainColor),
                                   Expanded(
                                     child: Theme(
                                       data: Theme.of(context).copyWith(
-                                        dividerColor: Colors.transparent, 
+                                        dividerColor: Colors.transparent,
                                       ),
                                       child: ExpansionTile(
-                                        tilePadding: const EdgeInsets.only(left: 12, right: 16, top: 4, bottom: 4),
+                                        tilePadding: const EdgeInsets.only(
+                                          left: 12,
+                                          right: 16,
+                                          top: 4,
+                                          bottom: 4,
+                                        ),
                                         leading: Container(
                                           padding: const EdgeInsets.all(8),
                                           decoration: BoxDecoration(
                                             color: bgColor,
                                             shape: BoxShape.circle,
                                           ),
-                                          child: Icon(iconData, color: mainColor, size: 16),
+                                          child: Icon(
+                                            iconData,
+                                            color: mainColor,
+                                            size: 16,
+                                          ),
                                         ),
                                         title: Text(
                                           'Order #${o.id.substring(0, 8)}',
-                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF0F172A)),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                            color: Color(0xFF0F172A),
+                                          ),
                                         ),
                                         subtitle: Text(
-                                          isReady ? "Ready for Pickup" : "Being Prepared",
-                                          style: TextStyle(color: mainColor, fontSize: 11, fontWeight: FontWeight.bold),
+                                          isReady
+                                              ? "Ready for Pickup"
+                                              : "Being Prepared",
+                                          style: TextStyle(
+                                            color: mainColor,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
                                         trailing: SizedBox(
                                           width: 70,
                                           child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.end,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.end,
                                             children: [
                                               Text(
                                                 '${o.items.length} item${o.items.length == 1 ? '' : 's'}',
-                                                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                                style: TextStyle(
+                                                  color: Colors.grey.shade600,
+                                                  fontSize: 12,
+                                                ),
                                               ),
                                               const SizedBox(width: 4),
-                                              Icon(Icons.arrow_drop_down, color: Colors.grey.shade400, size: 20),
+                                              Icon(
+                                                Icons.arrow_drop_down,
+                                                color: Colors.grey.shade400,
+                                                size: 20,
+                                              ),
                                             ],
                                           ),
                                         ),
-                                        childrenPadding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                                        childrenPadding: const EdgeInsets.only(
+                                          left: 16,
+                                          right: 16,
+                                          bottom: 16,
+                                        ),
                                         children: [
                                           ...o.items.map(
                                             (item) => Padding(
-                                              padding: const EdgeInsets.symmetric(vertical: 6.0),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 6.0,
+                                                  ),
                                               child: Row(
-                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment
+                                                        .spaceBetween,
                                                 children: [
                                                   Expanded(
                                                     child: Text(
                                                       item.productName,
-                                                      style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
+                                                      style: const TextStyle(
+                                                        fontSize: 13,
+                                                        color: Color(
+                                                          0xFF0F172A,
+                                                        ),
+                                                      ),
                                                       maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
                                                     ),
                                                   ),
                                                   Text(
                                                     'Qty: ${item.quantity.truncateToDouble() == item.quantity ? item.quantity.toInt() : item.quantity}',
-                                                    style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
+                                                    style: const TextStyle(
+                                                      fontSize: 13,
+                                                      color: Color(0xFF0F172A),
+                                                    ),
                                                   ),
                                                 ],
                                               ),
@@ -773,95 +1493,268 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                               width: double.infinity,
                                               height: 44,
                                               child: ElevatedButton.icon(
-                                                icon: const Icon(LucideIcons.check, color: Colors.white, size: 18),
+                                                icon: const Icon(
+                                                  LucideIcons.check,
+                                                  color: Colors.white,
+                                                  size: 18,
+                                                ),
                                                 label: const Text(
                                                   'Complete Transaction',
-                                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14,
+                                                  ),
                                                 ),
                                                 style: ElevatedButton.styleFrom(
                                                   backgroundColor: Colors.green,
-                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
+                                                        ),
+                                                  ),
                                                   elevation: 0,
                                                 ),
-                                                // Confirm Completion logic[cite: 14]
-                                                onPressed: () async {
-                                                  final confirm = await showDialog<bool>(
-                                                    context: context,
-                                                    builder: (context) => Dialog(
-                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                                      backgroundColor: Colors.white,
-                                                      child: SizedBox(
-                                                        width: 400,
-                                                        child: Padding(
-                                                          padding: const EdgeInsets.all(24.0),
-                                                          child: Column(
-                                                            mainAxisSize: MainAxisSize.min,
-                                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                                            children: [
-                                                              const Text('Confirm Completion', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                                                              const SizedBox(height: 8),
-                                                              const Text('Are you sure you want to complete this order?', style: TextStyle(color: Colors.grey)),
-                                                              const SizedBox(height: 16),
-                                                              Container(
-                                                                padding: const EdgeInsets.all(16),
-                                                                decoration: BoxDecoration(
-                                                                  border: Border.all(color: Colors.grey.shade200),
-                                                                  borderRadius: BorderRadius.circular(8),
-                                                                ),
-                                                                child: Column(
-                                                                  children: [
-                                                                    Row(children: [const Icon(LucideIcons.check, color: Colors.green, size: 16), const SizedBox(width: 8), const Text('Payment is received', style: TextStyle(fontSize: 13))]),
-                                                                    const SizedBox(height: 8),
-                                                                    Row(children: [const Icon(LucideIcons.check, color: Colors.green, size: 16), const SizedBox(width: 8), const Text('Receipt will be generated', style: TextStyle(fontSize: 13))]),
-                                                                  ],
-                                                                ),
-                                                              ),
-                                                              const SizedBox(height: 24),
-                                                              Row(
-                                                                children: [
-                                                                  Expanded(
-                                                                    child: OutlinedButton(
-                                                                      onPressed: () => Navigator.pop(context, false),
-                                                                      style: OutlinedButton.styleFrom(
-                                                                        foregroundColor: Colors.black87,
-                                                                        side: BorderSide(color: Colors.grey.shade300),
-                                                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                                                      ),
-                                                                      child: const Text('Cancel'),
-                                                                    ),
-                                                                  ),
-                                                                  const SizedBox(width: 12),
-                                                                  Expanded(
-                                                                    child: ElevatedButton(
-                                                                      style: ElevatedButton.styleFrom(
-                                                                        backgroundColor: Colors.green,
-                                                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                                                        elevation: 0,
-                                                                      ),
-                                                                      onPressed: () => Navigator.pop(context, true),
-                                                                      child: const Text('Confirm', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                                                    ),
-                                                                  ),
-                                                                ],
-                                                              )
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  );
+                                                
+                                                // onPressed: () async {
+                                                //   final confirm = await showDialog<bool>(
+                                                //     context: context,
+                                                //     builder: (context) => Dialog(
+                                                //       shape: RoundedRectangleBorder(
+                                                //         borderRadius:
+                                                //             BorderRadius.circular(
+                                                //               16,
+                                                //             ),
+                                                //       ),
+                                                //       backgroundColor:
+                                                //           Colors.white,
+                                                //       child: SizedBox(
+                                                //         width: 400,
+                                                //         child: Padding(
+                                                //           padding:
+                                                //               const EdgeInsets.all(
+                                                //                 24.0,
+                                                //               ),
+                                                //           child: Column(
+                                                //             mainAxisSize:
+                                                //                 MainAxisSize
+                                                //                     .min,
+                                                //             crossAxisAlignment:
+                                                //                 CrossAxisAlignment
+                                                //                     .start,
+                                                //             children: [
+                                                //               const Text(
+                                                //                 'Confirm Completion',
+                                                //                 style: TextStyle(
+                                                //                   fontSize: 18,
+                                                //                   fontWeight:
+                                                //                       FontWeight
+                                                //                           .bold,
+                                                //                 ),
+                                                //               ),
+                                                //               const SizedBox(
+                                                //                 height: 8,
+                                                //               ),
+                                                //               const Text(
+                                                //                 'Are you sure you want to complete this order?',
+                                                //                 style: TextStyle(
+                                                //                   color: Colors
+                                                //                       .grey,
+                                                //                 ),
+                                                //               ),
+                                                //               const SizedBox(
+                                                //                 height: 16,
+                                                //               ),
+                                                //               Container(
+                                                //                 padding:
+                                                //                     const EdgeInsets.all(
+                                                //                       16,
+                                                //                     ),
+                                                //                 decoration: BoxDecoration(
+                                                //                   border: Border.all(
+                                                //                     color: Colors
+                                                //                         .grey
+                                                //                         .shade200,
+                                                //                   ),
+                                                //                   borderRadius:
+                                                //                       BorderRadius.circular(
+                                                //                         8,
+                                                //                       ),
+                                                //                 ),
+                                                //                 child: Column(
+                                                //                   children: [
+                                                //                     Row(
+                                                //                       children: [
+                                                //                         const Icon(
+                                                //                           LucideIcons
+                                                //                               .check,
+                                                //                           color:
+                                                //                               Colors.green,
+                                                //                           size:
+                                                //                               16,
+                                                //                         ),
+                                                //                         const SizedBox(
+                                                //                           width:
+                                                //                               8,
+                                                //                         ),
+                                                //                         const Text(
+                                                //                           'Payment is received',
+                                                //                           style: TextStyle(
+                                                //                             fontSize:
+                                                //                                 13,
+                                                //                           ),
+                                                //                         ),
+                                                //                       ],
+                                                //                     ),
+                                                //                     const SizedBox(
+                                                //                       height: 8,
+                                                //                     ),
+                                                //                     Row(
+                                                //                       children: [
+                                                //                         const Icon(
+                                                //                           LucideIcons
+                                                //                               .check,
+                                                //                           color:
+                                                //                               Colors.green,
+                                                //                           size:
+                                                //                               16,
+                                                //                         ),
+                                                //                         const SizedBox(
+                                                //                           width:
+                                                //                               8,
+                                                //                         ),
+                                                //                         const Text(
+                                                //                           'Receipt will be generated',
+                                                //                           style: TextStyle(
+                                                //                             fontSize:
+                                                //                                 13,
+                                                //                           ),
+                                                //                         ),
+                                                //                       ],
+                                                //                     ),
+                                                //                   ],
+                                                //                 ),
+                                                //               ),
+                                                //               const SizedBox(
+                                                //                 height: 24,
+                                                //               ),
+                                                //               Row(
+                                                //                 children: [
+                                                //                   Expanded(
+                                                //                     child: OutlinedButton(
+                                                //                       onPressed: () =>
+                                                //                           Navigator.pop(
+                                                //                             context,
+                                                //                             false,
+                                                //                           ),
+                                                //                       style: OutlinedButton.styleFrom(
+                                                //                         foregroundColor:
+                                                //                             Colors.black87,
+                                                //                         side: BorderSide(
+                                                //                           color: Colors
+                                                //                               .grey
+                                                //                               .shade300,
+                                                //                         ),
+                                                //                         shape: RoundedRectangleBorder(
+                                                //                           borderRadius:
+                                                //                               BorderRadius.circular(
+                                                //                                 8,
+                                                //                               ),
+                                                //                         ),
+                                                //                       ),
+                                                //                       child: const Text(
+                                                //                         'Cancel',
+                                                //                       ),
+                                                //                     ),
+                                                //                   ),
+                                                //                   const SizedBox(
+                                                //                     width: 12,
+                                                //                   ),
+                                                //                   Expanded(
+                                                //                     child: ElevatedButton(
+                                                //                       style: ElevatedButton.styleFrom(
+                                                //                         backgroundColor:
+                                                //                             Colors.green,
+                                                //                         shape: RoundedRectangleBorder(
+                                                //                           borderRadius:
+                                                //                               BorderRadius.circular(
+                                                //                                 8,
+                                                //                               ),
+                                                //                         ),
+                                                //                         elevation:
+                                                //                             0,
+                                                //                       ),
+                                                //                       onPressed: () =>
+                                                //                           Navigator.pop(
+                                                //                             context,
+                                                //                             true,
+                                                //                           ),
+                                                //                       child: const Text(
+                                                //                         'Confirm',
+                                                //                         style: TextStyle(
+                                                //                           color:
+                                                //                               Colors.white,
+                                                //                           fontWeight:
+                                                //                               FontWeight.bold,
+                                                //                         ),
+                                                //                       ),
+                                                //                     ),
+                                                //                   ),
+                                                //                 ],
+                                                //               ),
+                                                //             ],
+                                                //           ),
+                                                //         ),
+                                                //       ),
+                                                //     ),
+                                                //   );
 
-                                                  if (confirm == true) {
-                                                    await widget.controller.completeOrder(o);
-                                                    if (context.mounted) {
-                                                      Navigator.pop(dialogContext); // Close pending orders modal
-                                                      _showReceiptDialog(o); // Show the final receipt[cite: 15]
-                                                    }
-                                                  }
-                                                },
+                                                //   if (confirm == true) {
+                                                //     await widget.controller
+                                                //         .completeOrder(o);
+                                                //     if (context.mounted) {
+                                                //       Navigator.pop(
+                                                //         dialogContext,
+                                                //       ); // Close pending orders modal
+                                                //       _showReceiptDialog(
+                                                //         o,
+                                                //       ); // Show the final receipt[cite: 15]
+                                                //     }
+                                                //   }
+                                                // },
+                                                onPressed: () async {
+  // Simply read the values directly from your database model!
+  double orderTotal = o.totalAmount;
+  double orderDiscount = o.discountAmount;
+  double orderSubtotal = orderTotal + orderDiscount;
+  
+  double orderQty = 0;
+  for (var item in o.items) {
+     orderQty += item.quantity;
+  }
+
+  // Open the Payment Dialog with the exact saved data
+  final confirm = await _showPaymentDialog(
+    subtotal: orderSubtotal,
+    discountAmt: orderDiscount, 
+    totalDue: orderTotal,       
+    itemsCount: o.items.length,
+    totalQty: orderQty,
+  );
+
+  // Complete and show receipt
+  if (confirm == true) {
+    await widget.controller.completeOrder(o);
+    if (context.mounted) {
+      Navigator.pop(context); 
+      _showReceiptDialog(o);  
+    }
+  }
+},
                                               ),
                                             ),
-                                          ]
+                                          ],
                                         ],
                                       ),
                                     ),
@@ -898,7 +1791,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
         fit: BoxFit.cover,
         errorBuilder: (_, _, _) => Container(
           color: Colors.grey.shade100,
-          child: const Center(child: Icon(LucideIcons.image, color: Colors.grey)),
+          child: const Center(
+            child: Icon(LucideIcons.image, color: Colors.grey),
+          ),
         ),
       );
     } else {
@@ -907,7 +1802,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
         fit: BoxFit.cover,
         errorBuilder: (_, _, _) => Container(
           color: Colors.grey.shade100,
-          child: const Center(child: Icon(LucideIcons.image, color: Colors.grey)),
+          child: const Center(
+            child: Icon(LucideIcons.image, color: Colors.grey),
+          ),
         ),
       );
     }
@@ -935,9 +1832,18 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
 
           final bottomInset = MediaQuery.of(context).padding.bottom;
           final totalHeight = constraints.maxHeight;
-          final maxCartHeight = (totalHeight - 56 - bottomInset).clamp(0.0, totalHeight * _kSnapFull);
-          final minCartHeight = (_kBaseChromeHeight + bottomInset).clamp(0.0, maxCartHeight);
-          final cartHeight = (totalHeight * _cartHeightFraction).clamp(minCartHeight, maxCartHeight);
+          final maxCartHeight = (totalHeight - 56 - bottomInset).clamp(
+            0.0,
+            totalHeight * _kSnapFull,
+          );
+          final minCartHeight = (_kBaseChromeHeight + bottomInset).clamp(
+            0.0,
+            maxCartHeight,
+          );
+          final cartHeight = (totalHeight * _cartHeightFraction).clamp(
+            minCartHeight,
+            maxCartHeight,
+          );
 
           return Stack(
             children: [
@@ -964,7 +1870,8 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                       },
                       onDragUpdate: (details) {
                         final delta = _dragStart - details.globalPosition.dy;
-                        final newFraction = _fractionAtDragStart + delta / totalHeight;
+                        final newFraction =
+                            _fractionAtDragStart + delta / totalHeight;
                         setState(() {
                           _cartHeightFraction = newFraction.clamp(
                             minCartHeight / totalHeight,
@@ -988,17 +1895,22 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
   // ── Item list ──────────────────────────────────────────────────────────────
   Widget _buildItemList() {
     final categories = [
-      'All', 
-      ...widget.controller.getUniqueCategories().where((c) => 
-        c.toLowerCase() != 'unassigned' && c.toLowerCase() != 'all'
-      )
+      'All',
+      ...widget.controller.getUniqueCategories().where(
+        (c) => c.toLowerCase() != 'unassigned' && c.toLowerCase() != 'all',
+      ),
     ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(left: 16.0, right: 16.0, top: 16.0, bottom: 8.0),
+          padding: const EdgeInsets.only(
+            left: 16.0,
+            right: 16.0,
+            top: 16.0,
+            bottom: 8.0,
+          ),
           child: Row(
             children: [
               Expanded(
@@ -1008,7 +1920,10 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                     prefixIcon: const Icon(Icons.search, color: Colors.grey),
                     filled: true,
                     fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: 0,
+                      horizontal: 16,
+                    ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Colors.grey.shade300),
@@ -1026,22 +1941,36 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                 stream: widget.controller.streamOrders(),
                 builder: (context, snapshot) {
                   final pendingCount = snapshot.hasData
-                      ? snapshot.data!.where((o) => o.status == 'prepared' || o.status == 'pending').length
+                      ? snapshot.data!
+                            .where(
+                              (o) =>
+                                  o.status == 'prepared' ||
+                                  o.status == 'pending',
+                            )
+                            .length
                       : 0;
-                      
+
                   return OutlinedButton.icon(
                     onPressed: () => _showPendingOrdersModal(context),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.orange,
                       side: BorderSide(color: Colors.orange.shade200),
                       backgroundColor: Colors.orange.shade50,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                     ),
                     icon: const Icon(LucideIcons.clock, size: 16),
                     label: Row(
                       children: [
-                        const Text("Pending Orders", style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text(
+                          "Pending Orders",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         if (pendingCount > 0) ...[
                           const SizedBox(width: 6),
                           Container(
@@ -1052,14 +1981,18 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                             ),
                             child: Text(
                               '$pendingCount',
-                              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
-                        ]
+                        ],
                       ],
                     ),
                   );
-                }
+                },
               ),
               const SizedBox(width: 12),
               Container(
@@ -1074,22 +2007,42 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                       child: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: !_isGridView! ? Colors.grey.shade100 : Colors.white,
-                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
+                          color: !_isGridView!
+                              ? Colors.grey.shade100
+                              : Colors.white,
+                          borderRadius: const BorderRadius.horizontal(
+                            left: Radius.circular(8),
+                          ),
                         ),
-                        child: Icon(LucideIcons.list, size: 18, color: !_isGridView! ? Colors.black : Colors.grey),
+                        child: Icon(
+                          LucideIcons.list,
+                          size: 18,
+                          color: !_isGridView! ? Colors.black : Colors.grey,
+                        ),
                       ),
                     ),
-                    Container(width: 1, height: 24, color: Colors.grey.shade300),
+                    Container(
+                      width: 1,
+                      height: 24,
+                      color: Colors.grey.shade300,
+                    ),
                     InkWell(
                       onTap: () => setState(() => _isGridView = true),
                       child: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: _isGridView! ? Colors.grey.shade100 : Colors.white,
-                          borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
+                          color: _isGridView!
+                              ? Colors.grey.shade100
+                              : Colors.white,
+                          borderRadius: const BorderRadius.horizontal(
+                            right: Radius.circular(8),
+                          ),
                         ),
-                        child: Icon(LucideIcons.layoutGrid, size: 18, color: _isGridView! ? Colors.black : Colors.grey),
+                        child: Icon(
+                          LucideIcons.layoutGrid,
+                          size: 18,
+                          color: _isGridView! ? Colors.black : Colors.grey,
+                        ),
                       ),
                     ),
                   ],
@@ -1113,17 +2066,26 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                   onTap: () => setState(() => _selectedCategory = cat),
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                      color: isSelected
+                          ? const Color(0xFF0F172A)
+                          : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Center(
                       child: Text(
                         cat,
                         style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.grey.shade600,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          color: isSelected
+                              ? Colors.white
+                              : Colors.grey.shade600,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.normal,
                           fontSize: 13,
                         ),
                       ),
@@ -1138,7 +2100,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
           child: _isGridView!
               ? LayoutBuilder(
                   builder: (context, constraints) {
-                    int crossAxisCount = constraints.maxWidth > 800 ? 4 : (constraints.maxWidth > 600 ? 3 : 2);
+                    int crossAxisCount = constraints.maxWidth > 800
+                        ? 4
+                        : (constraints.maxWidth > 600 ? 3 : 2);
                     return GridView.builder(
                       padding: const EdgeInsets.all(16),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -1152,7 +2116,7 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                         final item = _filteredItems[index];
                         final cartQty = _cart[item.id] ?? 0;
                         final availableStock = item.quantity - cartQty;
-                        
+
                         return Card(
                           elevation: 0,
                           color: Colors.white,
@@ -1165,7 +2129,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                             children: [
                               Expanded(
                                 child: ClipRRect(
-                                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                                  borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(12),
+                                  ),
                                   child: SizedBox(
                                     width: double.infinity,
                                     child: _buildImage(item.imageUrl),
@@ -1182,14 +2148,17 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                       style: const TextStyle(
                                         fontWeight: FontWeight.w700,
                                         fontSize: 14,
-                                        color: Color(0xFF0F172A)
+                                        color: Color(0xFF0F172A),
                                       ),
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                     const SizedBox(height: 8),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
                                       decoration: BoxDecoration(
                                         color: Colors.green.shade50,
                                         borderRadius: BorderRadius.circular(4),
@@ -1205,7 +2174,8 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                     ),
                                     const SizedBox(height: 12),
                                     Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
                                       children: [
                                         Text(
                                           "₱${item.price.toStringAsFixed(2)}",
@@ -1216,12 +2186,17 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                           ),
                                         ),
                                         InkWell(
-                                          onTap: availableStock > 0 ? () => _addToCart(item) : null,
+                                          onTap: availableStock > 0
+                                              ? () => _addToCart(item)
+                                              : null,
                                           child: Container(
                                             padding: const EdgeInsets.all(6),
                                             decoration: BoxDecoration(
-                                              color: availableStock > 0 ? Colors.orange : Colors.grey.shade300,
-                                              borderRadius: BorderRadius.circular(8),
+                                              color: availableStock > 0
+                                                  ? Colors.orange
+                                                  : Colors.grey.shade300,
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
                                             ),
                                             child: const Icon(
                                               Icons.add,
@@ -1261,7 +2236,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                       child: Row(
                         children: [
                           ClipRRect(
-                            borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                            borderRadius: const BorderRadius.horizontal(
+                              left: Radius.circular(12),
+                            ),
                             child: SizedBox(
                               width: 100,
                               height: 100,
@@ -1279,14 +2256,17 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w700,
                                       fontSize: 15,
-                                      color: Color(0xFF0F172A)
+                                      color: Color(0xFF0F172A),
                                     ),
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   const SizedBox(height: 8),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.green.shade50,
                                       borderRadius: BorderRadius.circular(4),
@@ -1305,7 +2285,9 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                             ),
                           ),
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16.0,
+                            ),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.end,
@@ -1320,11 +2302,15 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                 ),
                                 const SizedBox(height: 12),
                                 InkWell(
-                                  onTap: availableStock > 0 ? () => _addToCart(item) : null,
+                                  onTap: availableStock > 0
+                                      ? () => _addToCart(item)
+                                      : null,
                                   child: Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
-                                      color: availableStock > 0 ? Colors.orange : Colors.grey.shade300,
+                                      color: availableStock > 0
+                                          ? Colors.orange
+                                          : Colors.grey.shade300,
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: const Icon(
@@ -1351,10 +2337,14 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
   Widget _buildCartPanel() {
     int distinctItems = _cart.length;
     double totalQty = _cart.values.fold(0.0, (sum, val) => sum + val);
-    String qtyDisplay = totalQty.truncateToDouble() == totalQty ? totalQty.toInt().toString() : totalQty.toStringAsFixed(2);
-    
+    String qtyDisplay = totalQty.truncateToDouble() == totalQty
+        ? totalQty.toInt().toString()
+        : totalQty.toStringAsFixed(2);
+
     double subtotal = _calculateTotal();
-    double discountAmt = _isDiscountPercentage ? (subtotal * (_discountValue / 100)) : _discountValue;
+    double discountAmt = _isDiscountPercentage
+        ? (subtotal * (_discountValue / 100))
+        : _discountValue;
     if (discountAmt > subtotal) discountAmt = subtotal; // Cap discount
     double totalDue = subtotal - discountAmt;
 
@@ -1373,7 +2363,11 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                 children: [
                   Row(
                     children: [
-                      const Icon(LucideIcons.shoppingCart, color: Colors.white, size: 20),
+                      const Icon(
+                        LucideIcons.shoppingCart,
+                        color: Colors.white,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       const Text(
                         'Current Order Cart',
@@ -1388,36 +2382,54 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           '$distinctItems items',
-                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
                           children: [
-                            const Icon(LucideIcons.packageCheck, size: 12, color: Colors.white),
+                            const Icon(
+                              LucideIcons.packageCheck,
+                              size: 12,
+                              color: Colors.white,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               '$qtyDisplay qty',
-                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ],
                         ),
                       ),
                     ],
-                  )
+                  ),
                 ],
               ),
             ),
@@ -1428,7 +2440,7 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                   final availH = constraints.maxHeight;
                   if (availH <= 0) return const SizedBox.shrink();
                   final opacity = (availH / 60.0).clamp(0.0, 1.0);
-                  
+
                   return AnimatedOpacity(
                     opacity: opacity,
                     duration: const Duration(milliseconds: 80),
@@ -1437,7 +2449,10 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                           ? const Center(
                               child: Text(
                                 'Cart is empty',
-                                style: TextStyle(color: Colors.grey, fontSize: 16),
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 16,
+                                ),
                               ),
                             )
                           : ListView.builder(
@@ -1448,54 +2463,86 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                 final qty = _cart[itemId]!;
                                 InventoryItem item;
                                 try {
-                                  item = widget.controller.allItems.firstWhere((i) => i.id == itemId);
+                                  item = widget.controller.allItems.firstWhere(
+                                    (i) => i.id == itemId,
+                                  );
                                 } catch (_) {
                                   return const SizedBox.shrink();
                                 }
-                                
-                                bool isFractional = !['pcs', 'box', 'pack', ''].contains(item.unit.toLowerCase());
+
+                                bool isFractional = ![
+                                  'pcs',
+                                  'box',
+                                  'pack',
+                                  '',
+                                ].contains(item.unit.toLowerCase());
 
                                 return Card(
-                                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 6,
+                                  ),
                                   color: Colors.white,
                                   elevation: 0,
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(8),
-                                    side: BorderSide(color: Colors.grey.shade200),
+                                    side: BorderSide(
+                                      color: Colors.grey.shade200,
+                                    ),
                                   ),
                                   child: Padding(
                                     padding: const EdgeInsets.all(12),
                                     child: Column(
                                       children: [
                                         Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Expanded(
                                               child: Wrap(
-                                                crossAxisAlignment: WrapCrossAlignment.center,
+                                                crossAxisAlignment:
+                                                    WrapCrossAlignment.center,
                                                 spacing: 6,
                                                 children: [
                                                   Text(
                                                     item.name,
                                                     style: const TextStyle(
-                                                      fontWeight: FontWeight.bold,
+                                                      fontWeight:
+                                                          FontWeight.bold,
                                                       fontSize: 14,
-                                                      color: Color(0xFF0F172A)
+                                                      color: Color(0xFF0F172A),
                                                     ),
                                                   ),
                                                   if (isFractional)
                                                     Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 4,
+                                                            vertical: 2,
+                                                          ),
                                                       decoration: BoxDecoration(
-                                                        color: Colors.orange.shade50,
-                                                        borderRadius: BorderRadius.circular(4),
+                                                        color: Colors
+                                                            .orange
+                                                            .shade50,
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              4,
+                                                            ),
                                                       ),
                                                       child: Text(
                                                         "BY WEIGHT",
-                                                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.orange.shade800),
+                                                        style: TextStyle(
+                                                          fontSize: 9,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          color: Colors
+                                                              .orange
+                                                              .shade800,
+                                                        ),
                                                       ),
-                                                    )
+                                                    ),
                                                 ],
                                               ),
                                             ),
@@ -1514,29 +2561,46 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                           children: [
                                             Text(
                                               "₱${item.price.toStringAsFixed(2)} / ${item.unit}",
-                                              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-                                            )
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.grey.shade500,
+                                              ),
+                                            ),
                                           ],
                                         ),
                                         const SizedBox(height: 12),
                                         Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
                                           children: [
                                             _QuantityStepper(
                                               initialValue: qty,
                                               unit: item.unit,
-                                              onChanged: (newQty) => _setCartQuantity(itemId, newQty),
+                                              onChanged: (newQty) =>
+                                                  _setCartQuantity(
+                                                    itemId,
+                                                    newQty,
+                                                  ),
                                             ),
                                             IconButton(
-                                              icon: Icon(LucideIcons.trash2, color: Colors.red.shade400, size: 18),
-                                              onPressed: () => _setCartQuantity(itemId, 0),
-                                              constraints: const BoxConstraints(),
+                                              icon: Icon(
+                                                LucideIcons.trash2,
+                                                color: Colors.red.shade400,
+                                                size: 18,
+                                              ),
+                                              onPressed: () =>
+                                                  _setCartQuantity(itemId, 0),
+                                              constraints:
+                                                  const BoxConstraints(),
                                               padding: const EdgeInsets.all(8),
                                               style: IconButton.styleFrom(
                                                 shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(8),
-                                                  side: BorderSide(color: Colors.red.shade100)
-                                                )
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                  side: BorderSide(
+                                                    color: Colors.red.shade100,
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           ],
@@ -1547,12 +2611,12 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                                 );
                               },
                             ),
-                    ), 
-                  ); 
+                    ),
+                  );
                 },
-              ), 
-            ), 
-            
+              ),
+            ),
+
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -1582,17 +2646,34 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  _isDiscountPercentage 
+                                  _isDiscountPercentage
                                       ? "${_discountValue.toStringAsFixed(_discountValue.truncateToDouble() == _discountValue ? 0 : 2)}% ${_discountReason.isEmpty ? 'Discount' : _discountReason}"
                                       : "₱${_discountValue.toStringAsFixed(_discountValue.truncateToDouble() == _discountValue ? 0 : 2)} ${_discountReason.isEmpty ? 'Discount' : _discountReason}",
-                                  style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13),
+                                  style: const TextStyle(
+                                    color: Colors.orange,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
                                 ),
                                 const SizedBox(height: 2),
-                                const Text("Applied to subtotal", style: TextStyle(color: Colors.grey, fontSize: 11)),
+                                const Text(
+                                  "Applied to subtotal",
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 11,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
-                          Text("-₱${discountAmt.toStringAsFixed(2)}", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 14)),
+                          Text(
+                            "-₱${discountAmt.toStringAsFixed(2)}",
+                            style: const TextStyle(
+                              color: Colors.orange,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
                           const SizedBox(width: 12),
                           InkWell(
                             onTap: () {
@@ -1606,9 +2687,15 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                               decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.orange.shade100),
+                                border: Border.all(
+                                  color: Colors.orange.shade100,
+                                ),
                               ),
-                              child: const Icon(LucideIcons.x, size: 14, color: Colors.orange),
+                              child: const Icon(
+                                LucideIcons.x,
+                                size: 14,
+                                color: Colors.orange,
+                              ),
                             ),
                           ),
                         ],
@@ -1619,21 +2706,43 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                     GestureDetector(
                       onTap: () => _showDiscountDialog(context),
                       child: CustomPaint(
-                        painter: _DashedRectPainter(color: Colors.grey.shade300, strokeWidth: 1.5, gap: 5.0),
+                        painter: _DashedRectPainter(
+                          color: Colors.grey.shade300,
+                          strokeWidth: 1.5,
+                          gap: 5.0,
+                        ),
                         child: Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 12,
+                            horizontal: 16,
+                          ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Row(
                                 children: [
-                                  Icon(LucideIcons.plus, size: 14, color: Colors.grey.shade600),
+                                  Icon(
+                                    LucideIcons.plus,
+                                    size: 14,
+                                    color: Colors.grey.shade600,
+                                  ),
                                   const SizedBox(width: 8),
-                                  Text("Add Discount", style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.w600)),
+                                  Text(
+                                    "Add Discount",
+                                    style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ],
                               ),
-                              Icon(LucideIcons.chevronRight, size: 16, color: Colors.grey.shade500),
+                              Icon(
+                                LucideIcons.chevronRight,
+                                size: 16,
+                                color: Colors.grey.shade500,
+                              ),
                             ],
                           ),
                         ),
@@ -1645,8 +2754,20 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text("Subtotal", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                      Text("₱${subtotal.toStringAsFixed(2)}", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                      Text(
+                        "Subtotal",
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      Text(
+                        "₱${subtotal.toStringAsFixed(2)}",
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 13,
+                        ),
+                      ),
                     ],
                   ),
                   if (_discountValue > 0) ...[
@@ -1654,8 +2775,22 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text("Discount", style: TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.w600)),
-                        Text("-₱${discountAmt.toStringAsFixed(2)}", style: const TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.bold)),
+                        const Text(
+                          "Discount",
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          "-₱${discountAmt.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                            color: Colors.orange,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -1665,8 +2800,21 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text("Total Due", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      Text("₱${totalDue.toStringAsFixed(2)}", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 18)),
+                      const Text(
+                        "Total Due",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      Text(
+                        "₱${totalDue.toStringAsFixed(2)}",
+                        style: const TextStyle(
+                          color: Colors.orange,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -1674,21 +2822,30 @@ class _PosCartPageState extends State<PosCartPage> with SingleTickerProviderStat
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton.icon(
-                      onPressed: _cart.isEmpty || _isProcessingCart ? null : _processOrder,
+                      onPressed: _cart.isEmpty || _isProcessingCart
+                          ? null
+                          : _processOrder,
                       icon: _isProcessingCart
                           ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
                             )
-                          : const Icon(LucideIcons.check, color: Colors.white, size: 20),
+                          : const Icon(
+                              LucideIcons.check,
+                              color: Colors.white,
+                              size: 20,
+                            ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         disabledBackgroundColor: Colors.grey.shade300,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        elevation: 0
+                        elevation: 0,
                       ),
                       label: Text(
                         _isProcessingCart ? 'Processing...' : 'Process Order',
@@ -1743,14 +2900,18 @@ class _DashedDivider extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dashed Border Container Painter 
+// Dashed Border Container Painter
 // ─────────────────────────────────────────────────────────────────────────────
 class _DashedRectPainter extends CustomPainter {
   final Color color;
   final double strokeWidth;
   final double gap;
 
-  _DashedRectPainter({this.color = Colors.black, this.strokeWidth = 1.0, this.gap = 5.0});
+  _DashedRectPainter({
+    this.color = Colors.black,
+    this.strokeWidth = 1.0,
+    this.gap = 5.0,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1760,13 +2921,21 @@ class _DashedRectPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
 
     final Path path = Path()
-      ..addRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, size.width, size.height), const Radius.circular(8)));
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(0, 0, size.width, size.height),
+          const Radius.circular(8),
+        ),
+      );
 
     final Path dashPath = Path();
     double distance = 0.0;
     for (PathMetric pathMetric in path.computeMetrics()) {
       while (distance < pathMetric.length) {
-        dashPath.addPath(pathMetric.extractPath(distance, distance + gap), Offset.zero);
+        dashPath.addPath(
+          pathMetric.extractPath(distance, distance + gap),
+          Offset.zero,
+        );
         distance += gap * 2;
       }
       distance = 0.0;
@@ -1887,7 +3056,10 @@ class _QuantityStepperState extends State<_QuantityStepper> {
     if (_isSolidItem()) return val.toInt().toString();
     return val.truncateToDouble() == val
         ? val.toInt().toString()
-        : val.toString().replaceAll(RegExp(r'0*$'), '').replaceAll(RegExp(r'\.$'), '');
+        : val
+              .toString()
+              .replaceAll(RegExp(r'0*$'), '')
+              .replaceAll(RegExp(r'\.$'), '');
   }
 
   void _submit() {
@@ -1933,15 +3105,27 @@ class _QuantityStepperState extends State<_QuantityStepper> {
               child: TextField(
                 controller: _controller,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
-                keyboardType: TextInputType.numberWithOptions(decimal: !isSolid),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+                keyboardType: TextInputType.numberWithOptions(
+                  decimal: !isSolid,
+                ),
                 inputFormatters: isSolid
                     ? [FilteringTextInputFormatter.digitsOnly]
-                    : [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+                    : [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'^\d*\.?\d*'),
+                        ),
+                      ],
                 onChanged: (val) {
                   final parsed = double.tryParse(val);
                   if (parsed != null && parsed > 0) {
-                    widget.onChanged(isSolid ? parsed.truncateToDouble() : parsed);
+                    widget.onChanged(
+                      isSolid ? parsed.truncateToDouble() : parsed,
+                    );
                   }
                 },
                 onSubmitted: (_) => _submit(),
@@ -1954,7 +3138,14 @@ class _QuantityStepperState extends State<_QuantityStepper> {
             ),
           ),
           if (!isSolid) ...[
-            Text(widget.unit, style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.bold)),
+            Text(
+              widget.unit,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade700,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(width: 4),
           ],
           InkWell(

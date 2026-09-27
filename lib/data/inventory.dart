@@ -46,7 +46,7 @@ class MapElement {
     'height': size.height,
     'label': label,
     'rotation': rotation,
-  };
+  };  
 
   factory MapElement.fromJson(Map<String, dynamic> json) => MapElement(
     id: json['id'],
@@ -201,41 +201,35 @@ class CustomerOrderItem {
         quantity: (json['quantity'] as num?)?.toDouble() ?? 0.0,
       );
 }
-
 class CustomerOrder {
   final String id;
-  final String status;
   final List<CustomerOrderItem> items;
-  final String? locationId;
-  final String? createdBy;
-  final String? preparedBy;
+  final String status;
   final DateTime createdAt;
+  final double totalAmount;
+  final double discountAmount; // <-- 1. ADD THIS
 
   CustomerOrder({
     required this.id,
-    required this.status,
     required this.items,
-    this.locationId,
-    this.createdBy,
-    this.preparedBy,
+    required this.status,
     required this.createdAt,
+    this.totalAmount = 0.0,
+    this.discountAmount = 0.0, // <-- 2. ADD THIS
   });
 
-  factory CustomerOrder.fromSupabase(Map<String, dynamic> json) {
-    final itemsList = (json['items'] as List<dynamic>?) ?? [];
+  factory CustomerOrder.fromJson(Map<String, dynamic> json) {
     return CustomerOrder(
-      id: json['id']?.toString() ?? '',
-      status: json['status']?.toString() ?? 'pending',
-      items: itemsList
-          .map((i) => CustomerOrderItem.fromJson(i as Map<String, dynamic>))
-          .toList(),
-      locationId: json['location_id']?.toString(),
-      // Using .toString() safely converts the BigInt from Supabase to a String if it exists, and leaves it null if it doesn't.
-      createdBy: json['created_by']?.toString(),
-      preparedBy: json['prepared_by']?.toString(),
-      createdAt: json['created_at'] != null 
-          ? DateTime.parse(json['created_at']).toLocal() 
-          : DateTime.now(),
+      id: json['id'].toString(),
+      status: json['status'] ?? 'pending',
+      createdAt: DateTime.parse(json['created_at']).toLocal(),
+      totalAmount: (json['total_amount'] as num?)?.toDouble() ?? 0.0, 
+      // 3. READ IT FROM SUPABASE:
+      discountAmount: (json['discount_amount'] as num?)?.toDouble() ?? 0.0, 
+      items: (json['items'] as List<dynamic>?)
+              ?.map((i) => CustomerOrderItem.fromJson(i as Map<String, dynamic>))
+              .toList() ??
+          [],
     );
   }
 }
