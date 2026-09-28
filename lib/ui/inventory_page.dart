@@ -7,6 +7,7 @@ import 'package:inventory_plus/ui/widgets/item_card.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:inventory_plus/ui/widgets/app_toast.dart';
 
 class InventoryPage extends StatefulWidget {
   final InventoryController controller;
@@ -26,6 +27,30 @@ class _InventoryPageState extends State<InventoryPage> {
   String _searchQuery = "";
   String _selectedCategory = "All";
   final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSystemSettings();
+  }
+
+  Future<void> _loadSystemSettings() async {
+    try {
+      await widget.controller.loadSystemSettings();
+    } catch (e) {
+      if (mounted)
+        _showToast("Could not load stock thresholds: $e", isError: true);
+    }
+    if (mounted) setState(() {});
+  }
+
+  // --- UPPER RIGHT TOAST NOTIFICATION ---
+  void _showToast(String message, {bool isError = false}) {
+    if (!mounted) return;
+    isError
+        ? AppToast.error(context, message)
+        : AppToast.success(context, message);
+  }
 
   @override
   void dispose() {
@@ -71,81 +96,92 @@ class _InventoryPageState extends State<InventoryPage> {
             child: Column(
               children: [
                 Row(
-  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-  children: [
-    const Text(
-      "Inventory List",
-      style: TextStyle(
-        fontSize: 20,
-        fontWeight: FontWeight.bold,
-        color: Color(0xFF111827),
-      ),
-    ),
-    if (widget.controller.isAdmin)
-      Row(
-        children: [
-          _buildHeaderButton(
-            icon: LucideIcons.download,
-            label: "Export Report",
-            isNew: true,
-            onPressed: () => _showReportDialog(context),
-          ),
-          const SizedBox(width: 8),
-          _buildHeaderButton(
-            icon: LucideIcons.qrCode,
-            label: "QR Labels",
-            isNew: true,
-            onPressed: () => _generateAndPrintQRLabels(context),
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton.icon(
-            onPressed: () {
-              final isDesktop = MediaQuery.of(context).size.width >= 600;
-              if (isDesktop) {
-                showDialog(
-                  context: context,
-                  builder: (context) => Dialog(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: SizedBox(
-                      width: 500,
-                      height: 750,
-                      child: AddItemPage(
-                        controller: widget.controller,
-                        onAdd: (newItem) => setState(() {}),
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "Inventory List",
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF111827),
                       ),
                     ),
-                  ),
-                );
-              } else {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => AddItemPage(
-                      controller: widget.controller,
-                      onAdd: (newItem) => setState(() {}),
-                    ),
-                  ),
-                );
-              }
-            },
-            icon: const Icon(LucideIcons.plus, size: 14),
-            label: const Text("New Item"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
-        ],
-      ),
-  ],
-),
+                    if (widget.controller.isAdmin)
+                      Row(
+                        children: [
+                          _buildHeaderButton(
+                            icon: LucideIcons.download,
+                            label: "Export Report",
+                            isNew: true,
+                            onPressed: () => _showReportDialog(context),
+                          ),
+                          const SizedBox(width: 8),
+                          _buildHeaderButton(
+                            icon: LucideIcons.qrCode,
+                            label: "QR Labels",
+                            isNew: true,
+                            onPressed: () => _generateAndPrintQRLabels(context),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              final isDesktop =
+                                  MediaQuery.of(context).size.width >= 600;
+                              if (isDesktop) {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => Dialog(
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    clipBehavior: Clip.antiAlias,
+                                    child: SizedBox(
+                                      width: 500,
+                                      height: 750,
+                                      child: AddItemPage(
+                                        controller: widget.controller,
+                                        onAdd: (newItem) {
+                                          setState(() {});
+                                          _showToast(
+                                            '"${newItem.name}" added to inventory',
+                                          );
+                                        }
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => AddItemPage(
+                                      controller: widget.controller,
+                                      onAdd: (newItem) {
+                                        setState(() {});
+                                        _showToast(
+                                          '"${newItem.name}" added to inventory',
+                                        );
+                                      }
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                            icon: const Icon(LucideIcons.plus, size: 14),
+                            label: const Text("New Item"),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _searchController,
@@ -214,6 +250,7 @@ class _InventoryPageState extends State<InventoryPage> {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: ItemCard(
                           item: filteredInventory[index - 1],
+                          controller: widget.controller,
                           onClick: widget.onSelectItem,
                         ),
                       );
@@ -262,6 +299,7 @@ class _InventoryPageState extends State<InventoryPage> {
       ),
     );
   }
+
   // --- NEW UI HELPER FOR EXPORT BUTTONS ---
   Widget _buildHeaderButton({
     required IconData icon,
@@ -275,10 +313,19 @@ class _InventoryPageState extends State<InventoryPage> {
         OutlinedButton.icon(
           onPressed: onPressed,
           icon: Icon(icon, size: 14, color: const Color(0xFF0F172A)),
-          label: Text(label, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.bold)),
+          label: Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF0F172A),
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           style: OutlinedButton.styleFrom(
             side: BorderSide(color: Colors.grey.shade300),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
             backgroundColor: Colors.white,
           ),
@@ -295,7 +342,11 @@ class _InventoryPageState extends State<InventoryPage> {
               ),
               child: const Text(
                 "NEW",
-                style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -307,57 +358,135 @@ class _InventoryPageState extends State<InventoryPage> {
   void _showReportDialog(BuildContext context) {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (dialogContext) {
         String selectedPeriod = 'Daily';
         return StatefulBuilder(
           builder: (stateContext, setState) {
-            return AlertDialog(
-              title: const Text('Generate Inventory Report'),
+            return Dialog(
+              backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(16),
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Select the report type/period:'),
-                  const SizedBox(height: 10),
-                  DropdownButton<String>(
-                    value: selectedPeriod,
-                    isExpanded: true,
-                    items: ['Daily', 'Weekly', 'Monthly'].map((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
-                    }).toList(),
-                    onChanged: (newValue) {
-                      if (newValue != null) {
-                        setState(() {
-                          selectedPeriod = newValue;
-                        });
-                      }
-                    },
-                  ),
-                ],
+              child: Container(
+                width: 450,
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          "Generate Inventory Report",
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(LucideIcons.x, color: Colors.grey),
+                          onPressed: () => Navigator.pop(dialogContext),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Select the report type/period:',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: selectedPeriod,
+                          isExpanded: true,
+                          icon: const Icon(LucideIcons.chevronDown, size: 18),
+                          items: ['Daily', 'Weekly', 'Monthly'].map((
+                            String value,
+                          ) {
+                            return DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(
+                                value,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (newValue) {
+                            if (newValue != null) {
+                              setState(() {
+                                selectedPeriod = newValue;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        OutlinedButton(
+                          onPressed: () => Navigator.pop(stateContext),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.black87,
+                            side: BorderSide(color: Colors.grey.shade300),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 14,
+                              horizontal: 24,
+                            ),
+                          ),
+                          child: const Text("Cancel"),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(stateContext);
+                            _generateAndPrintInventoryReport(
+                              context,
+                              selectedPeriod,
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 14,
+                              horizontal: 32,
+                            ),
+                            elevation: 0,
+                          ),
+                          child: const Text(
+                            "Generate PDF",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(stateContext),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () {
-                    Navigator.pop(stateContext);
-                    _generateAndPrintInventoryReport(context, selectedPeriod);
-                  },
-                  child: const Text('Generate PDF'),
-                ),
-              ],
             );
           },
         );
@@ -372,12 +501,7 @@ class _InventoryPageState extends State<InventoryPage> {
     final items = widget.controller.allItems;
 
     if (items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("No inventory items found to generate report."),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showToast("No inventory items found to generate report.", isError: true);
       return;
     }
 
@@ -399,7 +523,8 @@ class _InventoryPageState extends State<InventoryPage> {
         cutoffDate = now.subtract(const Duration(days: 30));
       }
 
-      final allTransactions = await widget.controller.fetchAllTransactionHistory();
+      final allTransactions = await widget.controller
+          .fetchAllTransactionHistory();
       final periodTransactions = allTransactions.where((tx) {
         final txDate = DateTime.parse(tx['created_at']).toLocal();
         return txDate.isAfter(cutoffDate);
@@ -409,12 +534,15 @@ class _InventoryPageState extends State<InventoryPage> {
       Map<String, int> receivedDetails = {};
 
       for (var tx in periodTransactions) {
+        final productId = tx['product_id']?.toString();
+        if (productId == null) continue; // e.g. 'delete' entries
         final qty = (tx['quantity_change'] as num).toInt();
-        final productId = tx['product_id'] as String;
 
         if (tx['transaction_type'] == 'checkout') {
-          issuedDetails[productId] = (issuedDetails[productId] ?? 0) + qty.abs();
-        } else if (tx['transaction_type'] == 'stock_in' || tx['transaction_type'] == 'add') {
+          issuedDetails[productId] =
+              (issuedDetails[productId] ?? 0) + qty.abs();
+        } else if (tx['transaction_type'] == 'stock_in' ||
+            tx['transaction_type'] == 'add') {
           receivedDetails[productId] = (receivedDetails[productId] ?? 0) + qty;
         }
       }
@@ -427,29 +555,30 @@ class _InventoryPageState extends State<InventoryPage> {
       tableRows.add(
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey300),
-          children: [
-            'Item Code',
-            'Item Name',
-            'Beginning Qty',
-            'Received',
-            'Issued',
-            'Ending Qty',
-            'Unit Cost',
-            'Total Value',
-          ]
-              .map(
-                (text) => pw.Padding(
-                  padding: const pw.EdgeInsets.all(6),
-                  child: pw.Text(
-                    text,
-                    style: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold,
-                      fontSize: 10,
+          children:
+              [
+                    'Item Code',
+                    'Item Name',
+                    'Beginning Qty',
+                    'Received',
+                    'Issued',
+                    'Ending Qty',
+                    'Unit Cost',
+                    'Total Value',
+                  ]
+                  .map(
+                    (text) => pw.Padding(
+                      padding: const pw.EdgeInsets.all(6),
+                      child: pw.Text(
+                        text,
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              )
-              .toList(),
+                  )
+                  .toList(),
         ),
       );
 
@@ -465,26 +594,27 @@ class _InventoryPageState extends State<InventoryPage> {
 
         tableRows.add(
           pw.TableRow(
-            children: [
-              item.sku,
-              item.name,
-              beginningQty.toString(),
-              received.toString(),
-              issued.toString(),
-              endingQty.toString(),
-              'P${item.price.toStringAsFixed(2)}',
-              'P${totalValue.toStringAsFixed(2)}',
-            ]
-                .map(
-                  (text) => pw.Padding(
-                    padding: const pw.EdgeInsets.all(6),
-                    child: pw.Text(
-                      text,
-                      style: const pw.TextStyle(fontSize: 10),
-                    ),
-                  ),
-                )
-                .toList(),
+            children:
+                [
+                      item.sku,
+                      item.name,
+                      beginningQty.toString(),
+                      received.toString(),
+                      issued.toString(),
+                      endingQty.toString(),
+                      'P${item.price.toStringAsFixed(2)}',
+                      'P${totalValue.toStringAsFixed(2)}',
+                    ]
+                    .map(
+                      (text) => pw.Padding(
+                        padding: const pw.EdgeInsets.all(6),
+                        child: pw.Text(
+                          text,
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      ),
+                    )
+                    .toList(),
           ),
         );
       }
@@ -586,17 +716,15 @@ class _InventoryPageState extends State<InventoryPage> {
       if (context.mounted) Navigator.pop(context);
       await Printing.sharePdf(
         bytes: bytes,
-        filename: 'Inventory_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+        filename:
+            'Inventory_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
       );
+
+      _showToast("Report generated");
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error generating PDF: $e"),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        _showToast("Error generating PDF: $e", isError: true);
       }
     }
   }
@@ -605,12 +733,7 @@ class _InventoryPageState extends State<InventoryPage> {
     final items = widget.controller.allItems;
 
     if (items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("No inventory items found to generate labels."),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showToast("No inventory items found to generate labels.", isError: true);
       return;
     }
 
@@ -697,15 +820,12 @@ class _InventoryPageState extends State<InventoryPage> {
         bytes: bytes,
         filename: 'Inventory_QR_Labels.pdf',
       );
+
+      _showToast("QR labels generated");
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error generating PDF: $e"),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        _showToast("Error generating PDF: $e", isError: true);
       }
     }
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../data/inventory.dart';
@@ -5,13 +7,17 @@ import '../../logic/inventory_controller.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart';
+import 'package:inventory_plus/ui/widgets/app_toast.dart';
+import 'package:inventory_plus/ui/widgets/app_dialog.dart';
+
 
 class ItemDetailPage extends StatefulWidget {
   final InventoryItem item;
   final InventoryController controller;
   final VoidCallback onBack;
   final Future<void> Function(InventoryItem) onUpdate;
-  final Function(String) onDelete;
+  final FutureOr<void> Function(String) onDelete;
 
   const ItemDetailPage({
     super.key,
@@ -48,12 +54,323 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   late TextEditingController _modelController;
   late TextEditingController _sizeController;
 
+  Color _statusColor(StockStatus status) {
+    switch (status) {
+      case StockStatus.ok:
+        return Colors.blue;
+      case StockStatus.low:
+        return Colors.orange;
+      case StockStatus.critical:
+      case StockStatus.out:
+        return Colors.red;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _currentItem = widget.item;
     _initControllers();
     _loadHistory();
+  }
+
+  Future<void> _showRestockDialog() async {
+    final qtyCtrl = TextEditingController();
+    final unit = _currentItem.unit;
+    final allowDecimals = const {
+      'kg',
+      'g',
+      'l',
+      'ml',
+    }.contains(unit.toLowerCase());
+    bool saving = false;
+    bool touched = false;
+    String? error;
+
+    String? validate(String text) {
+      final t = text.trim();
+      if (t.isEmpty) return 'Enter the quantity received';
+      final v = double.tryParse(t);
+      if (v == null) return 'Enter a valid number';
+      if (v <= 0) return 'Must be greater than 0';
+      return null;
+    }
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final value = double.tryParse(qtyCtrl.text.trim());
+          final newQty = (value != null && value > 0)
+              ? _currentItem.quantity + value
+              : null;
+
+          Future<void> submit() async {
+            touched = true;
+            final err = validate(qtyCtrl.text);
+            if (err != null) {
+              setDialogState(() => error = err);
+              return;
+            }
+            setDialogState(() {
+              error = null;
+              saving = true;
+            });
+            try {
+              final qty = double.parse(qtyCtrl.text.trim());
+              final updated = _currentItem.copyWith(
+                quantity: _currentItem.quantity + qty,
+              );
+              await widget.onUpdate(updated);
+              if (!mounted) return;
+              setState(() {
+                _currentItem = updated;
+                _stockController.text = updated.quantity.toString();
+              });
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
+              _toast(
+                'Restocked ${_currentItem.name}: +${_fmt(qty)} $unit '
+                '(now ${_fmt(updated.quantity)})',
+              );
+              _loadHistory();
+            } catch (e) {
+              if (dialogContext.mounted) setDialogState(() => saving = false);
+              _toast('Restock failed: $e', isError: true);
+            }
+          }
+
+          void addChip(int n) {
+            final next = (double.tryParse(qtyCtrl.text.trim()) ?? 0) + n;
+            final text = _fmt(next);
+            qtyCtrl.value = TextEditingValue(
+              text: text,
+              selection: TextSelection.collapsed(offset: text.length),
+            );
+            setDialogState(() {
+              if (touched) error = validate(text);
+            });
+          }
+
+          OutlineInputBorder border(Color c, [double w = 1]) =>
+              OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: c, width: w),
+              );
+
+          return AppDialog(
+            icon: LucideIcons.packagePlus,
+            color: Colors.orange,
+            title: 'Restock',
+            subtitle: _currentItem.name,
+            actions: [
+              OutlinedButton(
+                onPressed: saving ? null : () => Navigator.pop(dialogContext),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.black87,
+                  side: BorderSide(color: Colors.grey.shade300),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: saving ? null : submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'Add stock',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+              ),
+            ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Current -> New summary
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _stockSummary(
+                          'CURRENT',
+                          '${_fmt(_currentItem.quantity)} $unit',
+                          const Color(0xFF0F172A),
+                        ),
+                      ),
+                      Icon(
+                        LucideIcons.arrowRight,
+                        size: 18,
+                        color: Colors.grey.shade400,
+                      ),
+                      Expanded(
+                        child: _stockSummary(
+                          'NEW',
+                          newQty == null ? '—' : '${_fmt(newQty)} $unit',
+                          newQty == null ? Colors.grey : Colors.orange.shade700,
+                          alignEnd: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Quantity received',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          LucideIcons.alertCircle,
+                          size: 13,
+                          color: Colors.red,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            error!,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: qtyCtrl,
+                  autofocus: true,
+                  keyboardType: TextInputType.numberWithOptions(
+                    decimal: allowDecimals,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(allowDecimals ? r'[0-9.]' : r'[0-9]'),
+                    ),
+                  ],
+                  onChanged: (text) => setDialogState(() {
+                    if (touched) error = validate(text);
+                  }),
+                  onSubmitted: (_) => saving ? null : submit(),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: '0',
+                    suffixText: unit,
+                    suffixStyle: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade600,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
+                    ),
+                    enabledBorder: border(
+                      error != null ? Colors.red : Colors.grey.shade300,
+                    ),
+                    focusedBorder: border(
+                      error != null ? Colors.red : Colors.orange,
+                      1.5,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  children: [1, 5, 10, 50]
+                      .map(
+                        (n) => ActionChip(
+                          label: Text('+$n'),
+                          labelStyle: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          backgroundColor: Colors.orange.withOpacity(0.08),
+                          side: BorderSide.none,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          onPressed: saving ? null : () => addChip(n),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    qtyCtrl.dispose();
+  }
+
+  Widget _stockSummary(
+    String label,
+    String value,
+    Color color, {
+    bool alignEnd = false,
+  }) {
+    return Column(
+      crossAxisAlignment: alignEnd
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+            color: Colors.grey.shade500,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _loadHistory() async {
@@ -198,6 +515,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   Future<void> _handleSave() async {
+
+    if (!_validate()) {
+    _toast('Please fix the highlighted fields', isError: true);
+    return;
+  }
+
     setState(() => _isSaving = true);
 
     try {
@@ -253,11 +576,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           _selectedImage = null;
         });
         await _loadHistory();
-        _showSnackBar('Item updated successfully', Colors.green);
+        _toast('Item updated successfully');
       }
     } catch (e) {
       if (mounted) {
-        _showSnackBar('Error updating item: $e', Colors.red);
+        _toast('Error updating item: $e', isError: true);
       }
     } finally {
       if (mounted) {
@@ -266,24 +589,31 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
-  Future<void> _handleCheckout(double qty) async {
-    final updated = widget.controller.calculateCheckout(_currentItem, qty);
-    await widget.onUpdate(updated);
-    if (mounted) {
-      Navigator.pop(context);
-      _showSnackBar('Checked out $qty item(s)', Colors.orange);
-      await _loadHistory();
-    }
+  final Map<String, String> _errors = {};
+
+  void _toast(String message, {bool isError = false}) {
+    if (!mounted) return;
+    isError
+        ? AppToast.error(context, message)
+        : AppToast.success(context, message);
   }
 
-  void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+  String _fmt(double v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
+
+  
+  bool _validate() {
+    final errors = <String, String>{};
+    final price = double.tryParse(_priceController.text.trim());
+    if (price == null || price < 0) errors['price'] = 'Enter a valid price';
+    final stock = double.tryParse(_stockController.text.trim());
+    if (stock == null || stock < 0) errors['stock'] = 'Enter a valid quantity';
+    setState(() {
+      _errors
+        ..clear()
+        ..addAll(errors);
+    });
+    return errors.isEmpty;
   }
 
   @override
@@ -314,11 +644,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                             "Stock (Qty)",
                             _currentItem.quantity.toString(),
                             LucideIcons.package,
-                            _currentItem.quantity <=
-                                    (_currentItem.maxQuantity * 0.20)
-                                ? Colors.red
-                                : Colors.blue,
-                            _stockController,
+                            _statusColor(
+                              widget.controller.stockStatusFor(_currentItem),
+                            ),
+                            _stockController, 
                           ),
                         ],
                       ),
@@ -474,15 +803,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     String value,
     IconData icon,
     Color color,
-    TextEditingController controller,
-  ) {
+    TextEditingController controller, {
+    String? errorKey,
+  }) {
+    final error = errorKey == null ? null : _errors[errorKey];
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
+          border: Border.all(
+            color: (_isEditing && error != null)
+                ? Colors.red
+                : Colors.grey.shade200,
+          ),
         ),
         child: Row(
           children: [
@@ -496,10 +831,28 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     label.toUpperCase(),
                     style: const TextStyle(fontSize: 10, color: Colors.grey),
                   ),
+                  if (_isEditing && error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        error,
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   _isEditing
                       ? TextField(
                           controller: controller,
                           keyboardType: TextInputType.number,
+                          onChanged: (_) {
+                            if (errorKey != null &&
+                                _errors.containsKey(errorKey)) {
+                              setState(() => _errors.remove(errorKey));
+                            }
+                          },
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
@@ -881,8 +1234,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
         child: Row(
           children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _showRestockDialog,
+                icon: const Icon(LucideIcons.plus, size: 18),
+                label: const Text("Restock"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+            ),
             if (widget.controller.currentUserRole?.toLowerCase() ==
                 'admin') ...[
+              const SizedBox(width: 12),
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: _showDeleteDialog,
@@ -902,29 +1268,98 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     );
   }
 
-  void _showDeleteDialog() {
-    showDialog(
+  Future<void> _showDeleteDialog() async {
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Delete Item?"),
-        content: Text("Remove \"${_currentItem.name}\" from inventory?"),
+      builder: (dialogContext) => AppDialog(
+        icon: LucideIcons.trash2,
+        color: Colors.red,
+        title: 'Delete item?',
+        subtitle: "This can't be undone",
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.black87,
+              side: BorderSide(color: Colors.grey.shade300),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Cancel'),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
-              Navigator.pop(context);
-              widget.onDelete(_currentItem.id);
-            },
-            child: const Text("Delete", style: TextStyle(color: Colors.white)),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(LucideIcons.trash2, size: 16),
+            label: const Text(
+              'Delete',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
           ),
         ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.red.withOpacity(0.15)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _currentItem.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_currentItem.sku}  •  ${_fmt(_currentItem.quantity)} ${_currentItem.unit} in stock',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'This permanently removes the item from your inventory.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
+          ],
+        ),
       ),
     );
+
+    if (confirmed != true || !mounted) return;
+
+    // Grab the overlay before deleting: this page may be disposed afterwards.
+    final overlay = Overlay.of(context, rootOverlay: true);
+    final name = _currentItem.name;
+    try {
+      await widget.onDelete(_currentItem.id);
+      AppToast.showOn(overlay, '"$name" deleted');
+    } catch (e) {
+      AppToast.showOn(overlay, 'Could not delete "$name": $e', isError: true);
+    }
   }
+
 }
 
 extension StringExtension on String {

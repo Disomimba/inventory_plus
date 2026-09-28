@@ -13,6 +13,7 @@ import 'dashboard_page.dart';
 import 'pos_cart_page.dart';
 import 'order_queue_page.dart';
 import 'transaction_history_page.dart';
+import 'system_settings_page.dart';
 
 class MainScreen extends StatefulWidget {
   final InventoryController controller;
@@ -39,7 +40,8 @@ class _MainScreenState extends State<MainScreen> {
     if (isDesktop) {
       showDialog(
         context: context,
-        builder: (context) => Dialog(
+        builder: (dialogContext) => Dialog(
+          // <- was (context)
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -50,16 +52,15 @@ class _MainScreenState extends State<MainScreen> {
             child: ItemDetailPage(
               item: item,
               controller: widget.controller,
-              onBack: () => Navigator.pop(context),
+              onBack: () => Navigator.pop(dialogContext),
               onUpdate: (updatedItem) async {
                 await widget.controller.updateItem(updatedItem);
-                if (mounted) {
-                  setState(() {});
-                }
+                if (mounted) setState(() {});
               },
-              onDelete: (id) {
-                setState(() => widget.controller.deleteItem(id));
-                Navigator.pop(context);
+              onDelete: (id) async {
+                await widget.controller.deleteItem(id);
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                if (mounted) setState(() {});
               },
             ),
           ),
@@ -89,9 +90,10 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  void _handleDeleteItem(String id) {
+  Future<void> _handleDeleteItem(String id) async {
+    await widget.controller.deleteItem(id);
+    if (!mounted) return;
     setState(() {
-      widget.controller.deleteItem(id);
       _isDetailView = false;
       _selectedItem = null;
     });
@@ -135,6 +137,7 @@ class _MainScreenState extends State<MainScreen> {
         final int orderQueueIndex = (isHelper || isAdmin) ? pageIndex++ : -1;
         final int inventoryIndex = pageIndex++;
         final int transactionIndex = isAdmin ? pageIndex++ : -1;
+        final int system_settings_page = isAdmin? pageIndex++ : -1;
 
         // 3. THE MASTER PAGE LIST
         final pages = <Widget>[];
@@ -159,6 +162,10 @@ class _MainScreenState extends State<MainScreen> {
         if (isAdmin) {
           pages.add(TransactionHistoryPage(controller: widget.controller));
         }  
+
+        if (isAdmin) {
+          pages.add(SystemSettingsPage(controller: widget.controller));
+        }
 
         // ==========================================
         // DESKTOP LAYOUT (Sidebar)
@@ -236,6 +243,13 @@ class _MainScreenState extends State<MainScreen> {
                                   Icons.history_outlined,
                                   'Transactions',
                                   activeIcon: Icons.history,
+                                ),
+                              if (isAdmin)
+                                _buildSidebarItem(
+                                  system_settings_page, // The index variable from your code
+                                  Icons.settings_outlined,
+                                  'System Settings',
+                                  activeIcon: Icons.settings,
                                 ),
                             ],
                           ),
@@ -316,6 +330,12 @@ class _MainScreenState extends State<MainScreen> {
                     icon: Icon(Icons.history_outlined, color: Colors.grey),
                     selectedIcon: Icon(Icons.history, color: Colors.white),
                     label: 'History',
+                  ),
+                if (isAdmin)
+                  const NavigationDestination(
+                    icon: Icon(Icons.settings_outlined, color: Colors.grey),
+                    selectedIcon: Icon(Icons.settings, color: Colors.white),
+                    label: 'Settings',
                   ),
               ],
             ),

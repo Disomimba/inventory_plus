@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:crypto/crypto.dart';
 import '../data/inventory.dart';
+import 'dart:math' as math;
+enum StockStatus { ok, low, critical, out }
 
 class InventoryController {
   final SupabaseClient supabase = Supabase.instance.client;
@@ -15,6 +17,63 @@ class InventoryController {
   String? currentUserId;
   String? loggedInUserEmail;
   bool get isAdmin => currentUserRole?.toLowerCase() == 'admin';
+  double globalLowStockPct = 20.0;
+  double globalCriticalPct = 10.0;
+  List<Map<String, dynamic>> availableMeasurements = [];
+
+  static const int _baselineRestocks = 3;
+  static const int _baselineWindowDays = 180;
+  Map<String, double> _baselineByProduct = {};
+
+  Future<void> _loadStockBaselines() async {
+    final locId = activeLocationId;
+    if (locId == null) return;
+    try {
+      final cutoff = DateTime.now()
+          .subtract(const Duration(days: _baselineWindowDays))
+          .toIso8601String();
+
+      final res = await supabase
+          .from('transaction_history')
+          .select('product_id, new_quantity, created_at')
+          .eq('location_id', locId)
+          .inFilter('transaction_type', ['add', 'stock_in'])
+          .gte('created_at', cutoff)
+          .order('created_at', ascending: false);
+
+      final Map<String, List<double>> levels = {};
+      for (final row in List<Map<String, dynamic>>.from(res)) {
+        final pid = row['product_id']?.toString();
+        if (pid == null) continue;
+        final list = levels.putIfAbsent(pid, () => []);
+        if (list.length < _baselineRestocks) {
+          list.add((row['new_quantity'] as num).toDouble());
+        }
+      }
+      _baselineByProduct = {
+        for (final e in levels.entries) e.key: e.value.reduce(math.max),
+      };
+    } catch (e) {
+      print("Error loading stock baselines: $e");
+    }
+  }
+
+  double baselineFor(InventoryItem item) =>
+      math.max(item.quantity, _baselineByProduct[item.id] ?? item.maxQuantity);
+
+  double stockPercentFor(InventoryItem item) {
+    final base = baselineFor(item);
+    return base <= 0 ? 100 : (item.quantity / base) * 100;
+  }
+
+  StockStatus stockStatusFor(InventoryItem item) {
+    if (item.quantity <= 0) return StockStatus.out;
+    final pct = stockPercentFor(item);
+    if (pct <= globalCriticalPct) return StockStatus.critical;
+    if (pct <= globalLowStockPct) return StockStatus.low;
+    return StockStatus.ok;
+  }
+  
 
   List<InventoryItem> get allItems => _items;
 
@@ -36,6 +95,89 @@ class InventoryController {
     return sha256.convert(bytes).toString();
   }
 
+  Future<void> loadSystemSettings() async {
+    try {
+      // 1. Fetch thresholds (same row that updateGlobalThresholds writes: id = 1)
+      final thresholdRes = await supabase
+          .from('threshold')
+          .select('low_stock, critical')
+          .eq('id', 1)
+          .maybeSingle();
+
+      if (thresholdRes != null) {
+        globalLowStockPct = (thresholdRes['low_stock'] as num).toDouble();
+        globalCriticalPct = (thresholdRes['critical'] as num).toDouble();
+      }
+
+      // 2. Fetch measurements
+      final measureRes = await supabase
+          .from('measurements')
+          .select('id, name, symbol');
+
+      availableMeasurements = List<Map<String, dynamic>>.from(measureRes);
+    } catch (e) {
+      print("Error loading system settings: $e");
+      rethrow; // callers decide how to show the error
+    }
+  }
+
+  Future<void> updateGlobalThresholds(double low, double critical) async {
+    try {
+      await supabase.from('threshold').upsert({
+        'id': 1, // Assuming row ID 1 for global settings
+        'low_stock': low,
+        'critical': critical,
+      });
+      globalLowStockPct = low;
+      globalCriticalPct = critical;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> addMeasurement(String name, String symbol) async {
+    try {
+      final response = await supabase
+          .from('measurements')
+          .insert({'name': name, 'symbol': symbol})
+          .select()
+          .single();
+
+      availableMeasurements.add(response);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> updateMeasurement(String id, String name, String symbol) async {
+    try {
+      final response = await supabase
+          .from('measurements')
+          .update({'name': name, 'symbol': symbol})
+          .eq('id', id)
+          .select()
+          .single();
+
+      final index = availableMeasurements.indexWhere(
+        (m) => m['id'].toString() == id,
+      );
+      if (index != -1) {
+        availableMeasurements[index] = response;
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> deleteMeasurement(String id) async {
+    try {
+      await supabase.from('measurements').delete().eq('id', id);
+      availableMeasurements.removeWhere((m) => m['id'].toString() == id);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<void> loadAppData(String userLocationId) async {
     activeLocationId = userLocationId;
 
@@ -48,6 +190,8 @@ class InventoryController {
       _items = (productsResponse as List)
           .map((p) => InventoryItem.fromSupabase(p))
           .toList();
+
+      await _loadStockBaselines();  
     } catch (e) {
       _items = [];
     }
@@ -84,6 +228,7 @@ class InventoryController {
 
       final savedItem = InventoryItem.fromSupabase(response);
       _items.add(savedItem);
+      _baselineByProduct[savedItem.id] = savedItem.quantity; 
 
       await _logTransaction(
         productId: savedItem.id,
@@ -148,61 +293,60 @@ class InventoryController {
   }
 
   Future<void> updateItem(InventoryItem updatedItem) async {
-    try {
-      final index = _items.indexWhere((item) => item.id == updatedItem.id);
-      if (index != -1) {
-        final oldItem = _items[index];
-        final quantityChange = updatedItem.quantity - oldItem.quantity;
+    final index = _items.indexWhere((item) => item.id == updatedItem.id);
+    final oldItem = index != -1 ? _items[index] : null;
 
-        _items[index] = updatedItem;
+    // 1. Write to the DB first. If this throws, nothing local has changed.
+    await supabase
+        .from('products')
+        .update({
+          'product_name': updatedItem.name,
+          'sku': updatedItem.sku,
+          'product_price': updatedItem.price,
+          'product_quantity': updatedItem.quantity,
+          'description': updatedItem.description,
+          'manufacturer': updatedItem.manufacturer,
+          'model': updatedItem.model,
+          'product_size': updatedItem.productSize,
+          'shelf_level': updatedItem.shelfLevel,
+          'bin_number': updatedItem.binNumber,
+          'image_url': updatedItem.imageUrl,
+          'unit': updatedItem.unit,
+          'max_quantity': updatedItem.maxQuantity,
+        })
+        .eq('id', updatedItem.id);
 
-        if (quantityChange != 0) {
-          await _logTransaction(
-            productId: updatedItem.id,
-            type: quantityChange > 0 ? 'stock_in' : 'checkout',
-            quantityChange: quantityChange,
-            newQuantity: updatedItem.quantity,
-          );
-        }
+    // 2. Only after success: update local state, log, refresh baselines.
+    if (index != -1 && oldItem != null) {
+      final quantityChange = updatedItem.quantity - oldItem.quantity;
+      _items[index] = updatedItem;
+
+      if (quantityChange != 0) {
+        await _logTransaction(
+          productId: updatedItem.id,
+          type: quantityChange > 0 ? 'stock_in' : 'checkout',
+          quantityChange: quantityChange,
+          newQuantity: updatedItem.quantity,
+        );
+        if (quantityChange > 0) await _loadStockBaselines();
       }
-
-      await supabase
-          .from('products')
-          .update({
-            'product_name': updatedItem.name,
-            'sku': updatedItem.sku,
-            'product_price': updatedItem.price,
-            'product_quantity': updatedItem.quantity,
-            'description': updatedItem.description,
-            'manufacturer': updatedItem.manufacturer,
-            'model': updatedItem.model,
-            'product_size': updatedItem.productSize,
-            'shelf_level': updatedItem.shelfLevel,
-            'bin_number': updatedItem.binNumber,
-            'image_url': updatedItem.imageUrl,
-            'unit': updatedItem.unit,
-            'max_quantity': updatedItem.maxQuantity,
-          })
-          .eq('id', updatedItem.id);
-    } catch (e) {}
+    }
   }
 
   Future<void> deleteItem(String id) async {
-    try {
-      final index = _items.indexWhere((item) => item.id == id);
-      await supabase.from('products').delete().eq('id', id);
+    final index = _items.indexWhere((item) => item.id == id);
+    await supabase.from('products').delete().eq('id', id); // throws on failure
 
-      if (index != -1) {
-        final itemToDelete = _items[index];
-        _items.removeAt(index);
-        await _logTransaction(
-          productId: null, 
-          type: 'delete',
-          quantityChange: -itemToDelete.quantity,
-          newQuantity: 0,
-        );
-      }
-    } catch (e) {}
+    if (index != -1) {
+      final itemToDelete = _items[index];
+      _items.removeAt(index);
+      await _logTransaction(
+        productId: null,
+        type: 'delete',
+        quantityChange: -itemToDelete.quantity,
+        newQuantity: 0,
+      );
+    }
   }
 
   Future<void> updateItemLocationDetails(
@@ -317,7 +461,7 @@ class InventoryController {
       sku: sku,
       price: double.tryParse(price) ?? 0.0,
       quantity: parsedQty,
-      maxQuantity: parsedMax == 0 ? 100 : parsedMax,
+       maxQuantity: parsedMax == 0 ? parsedQty : parsedMax,
       category: category,
       description: description,
       manufacturer: manufacturer,
