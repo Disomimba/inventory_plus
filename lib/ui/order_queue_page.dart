@@ -336,6 +336,7 @@ class _OrderCard extends StatelessWidget {
   }
 }
 
+// Update 1: Replace the entire _ExpandedItems widget to remove location tracking logic.
 class _ExpandedItems extends StatelessWidget {
   final dynamic order;
   final InventoryController controller;
@@ -348,20 +349,7 @@ class _ExpandedItems extends StatelessWidget {
       children: [
         Divider(height: 1, thickness: 1, color: Colors.grey.shade100),
         ...order.items.map<Widget>((item) {
-          String locationLabel = 'Unassigned';
-          try {
-            final dbItem = controller.allItems.firstWhere(
-              (i) => i.id == item.productId,
-            );
-            final parts = <String>[];
-            if (dbItem.shelfLevel != null && dbItem.shelfLevel!.isNotEmpty) {
-              parts.add('Shelf ${dbItem.shelfLevel}');
-            }
-            if (dbItem.binNumber != null && dbItem.binNumber!.isNotEmpty) {
-              parts.add('Bin ${dbItem.binNumber}');
-            }
-            if (parts.isNotEmpty) locationLabel = parts.join(' • ');
-          } catch (_) {}
+          // Removed the entire location mapping block that created 'locationLabel'
 
           return AnimatedOpacity(
             opacity: 1.0,
@@ -380,7 +368,7 @@ class _ExpandedItems extends StatelessWidget {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFBEADB), // Restored peach
+                      color: const Color(0xFFFBEADB),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -388,7 +376,7 @@ class _ExpandedItems extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF9E651D), // Restored orange/brown
+                        color: Color(0xFF9E651D),
                       ),
                     ),
                   ),
@@ -405,24 +393,7 @@ class _ExpandedItems extends StatelessWidget {
                             color: Colors.black87,
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.location_on_outlined,
-                              size: 11,
-                              color: Colors.grey.shade500,
-                            ),
-                            const SizedBox(width: 2),
-                            Text(
-                              locationLabel,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey.shade500,
-                              ),
-                            ),
-                          ],
-                        ),
+                        // Removed the SizedBox and Row displaying the location pin
                       ],
                     ),
                   ),
@@ -590,7 +561,7 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
     final double progress = _totalCount == 0 ? 0 : _checkedCount / _totalCount;
 
     return Scaffold(
-      backgroundColor: Colors.white, // Plain White Background
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -664,7 +635,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: _allChecked ? Colors.green.shade900 : const Color(0xFF9E651D),
+                              color: _allChecked
+                                  ? Colors.green.shade900
+                                  : const Color(0xFF9E651D),
                             ),
                           ),
                         ),
@@ -679,14 +652,8 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                   curve: Curves.easeInOut,
                   builder: (context, value, _) => LinearProgressIndicator(
                     value: value,
-                    backgroundColor: const Color(
-                      0xFFFBEADB,
-                    ), // Restored peach background
-                    color: _allChecked
-                        ? Colors.green
-                        : const Color(
-                            0xFFF58220,
-                          ), // Orange initially, GREEN on success!
+                    backgroundColor: const Color(0xFFFBEADB),
+                    color: _allChecked ? Colors.green : const Color(0xFFF58220),
                     minHeight: 6,
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -712,34 +679,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
               itemBuilder: (context, index) {
                 final item = widget.order.items[index];
                 final bool isChecked = _checkedIndices.contains(index);
-
-                // FIX: Determine the correct color based on the overall progress.
-                // If all items are checked, everything turns green. Otherwise, checked
-                // items are orange.
-                final Color activeColor = _allChecked ? Colors.green : const Color(0xFFF58220);
-
-                InventoryItem? dbItem;
-                try {
-                  dbItem = widget.controller.allItems.firstWhere(
-                    (i) => i.id == item.productId,
-                  );
-                } catch (_) {}
-
-                String locationString = "UNASSIGNED";
-                if (dbItem != null) {
-                  final parts = <String>[];
-                  if (dbItem.shelfLevel != null &&
-                      dbItem.shelfLevel!.isNotEmpty) {
-                    parts.add("Shelf ${dbItem.shelfLevel}");
-                  }
-                  if (dbItem.binNumber != null &&
-                      dbItem.binNumber!.isNotEmpty) {
-                    parts.add("Bin ${dbItem.binNumber}");
-                  }
-                  if (parts.isNotEmpty) {
-                    locationString = parts.join(" • ").toUpperCase();
-                  }
-                }
+                final Color activeColor = _allChecked
+                    ? Colors.green
+                    : const Color(0xFFF58220);
 
                 return GestureDetector(
                   onTap: () {
@@ -752,12 +694,12 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                     }
                   },
                   onLongPress: () {
-                    // Manual override just so you can test the green logic quickly!
                     setState(() {
-                      if (isChecked)
+                      if (isChecked) {
                         _checkedIndices.remove(index);
-                      else
+                      } else {
                         _checkedIndices.add(index);
+                      }
                     });
                   },
                   child: AnimatedContainer(
@@ -784,8 +726,9 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                           decoration: BoxDecoration(
                             color: isChecked ? activeColor : Colors.white,
                             border: Border.all(
-                              color:
-                                  isChecked ? activeColor : Colors.grey.shade400,
+                              color: isChecked
+                                  ? activeColor
+                                  : Colors.grey.shade400,
                               width: 2,
                             ),
                             borderRadius: BorderRadius.circular(4),
@@ -825,36 +768,28 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: isChecked ? activeColor : const Color(0xFFFBEADB),
+                                      color: isChecked
+                                          ? activeColor
+                                          : const Color(0xFFFBEADB),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
-                                      'QTY: ${item.quantity}',
+                                      'QTY: ${item.quantity.truncateToDouble() == item.quantity ? item.quantity.toInt() : item.quantity.toStringAsFixed(2)}',
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: isChecked ? Colors.white : const Color(0xFF9E651D),
+                                        color: isChecked
+                                            ? Colors.white
+                                            : const Color(0xFF9E651D),
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      locationString,
-                                      style: TextStyle(
-                                        color: Colors.grey.shade600,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
+                                  // Map/Location completely removed from here
                                 ],
                               ),
                             ],
                           ),
                         ),
-                        
                       ],
                     ),
                   ),
@@ -888,20 +823,15 @@ class _OrderChecklistPageState extends State<OrderChecklistPage> {
                       backgroundColor: WidgetStateProperty.resolveWith((
                         states,
                       ) {
-                        if (states.contains(WidgetState.disabled)) {
-                          return const Color(
-                            0xFFDAC7B8,
-                          ); // Original disabled color
-                        }
-                        return Colors
-                            .green; // Turn GREEN when active (success state!)
+                        if (states.contains(WidgetState.disabled))
+                          return const Color(0xFFDAC7B8);
+                        return Colors.green;
                       }),
                       foregroundColor: WidgetStateProperty.resolveWith((
                         states,
                       ) {
-                        if (states.contains(WidgetState.disabled)) {
-                          return Colors.white70; // Original disabled text
-                        }
+                        if (states.contains(WidgetState.disabled))
+                          return Colors.white70;
                         return Colors.white;
                       }),
                     ),
@@ -931,18 +861,6 @@ class PickConfirmationSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String locationString = "Unassigned";
-    if (item.shelfLevel != null || item.binNumber != null) {
-      final parts = <String>[];
-      if (item.shelfLevel != null && item.shelfLevel!.isNotEmpty) {
-        parts.add("Shelf ${item.shelfLevel}");
-      }
-      if (item.binNumber != null && item.binNumber!.isNotEmpty) {
-        parts.add("Bin ${item.binNumber}");
-      }
-      if (parts.isNotEmpty) locationString = parts.join(" • ");
-    }
-
     final String displayQty =
         targetQuantity.truncateToDouble() == targetQuantity
         ? targetQuantity.toInt().toString()
@@ -1053,7 +971,7 @@ class PickConfirmationSheet extends StatelessWidget {
                               fontSize: 16,
                             ),
                           ),
-                          TextSpan(text: "\nLocation: $locationString"),
+                          // Location string logic completely removed
                         ],
                       ),
                     ),
@@ -1073,7 +991,7 @@ class PickConfirmationSheet extends StatelessWidget {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green, // Green by default here
+                  backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
                   elevation: 0,
                   shape: RoundedRectangleBorder(

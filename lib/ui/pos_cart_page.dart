@@ -180,10 +180,10 @@ class _PosCartPageState extends State<PosCartPage>
           : _discountValue;
       if (discountAmt > subtotal) discountAmt = subtotal; // Cap discount
       double totalDue = subtotal - discountAmt;
-await widget.controller.createCustomerOrder(
-        items, 
-        totalAmount: totalDue, 
-        discountAmount: discountAmt, // <-- Pass the discount to be saved
+      await widget.controller.createCustomerOrder(
+        items,
+        totalAmount: totalDue,
+        discountAmount: discountAmt,
       );
 
       if (mounted) {
@@ -227,11 +227,46 @@ await widget.controller.createCustomerOrder(
     );
     final reasonCtrl = TextEditingController(text: _discountReason);
     bool isPercent = _isDiscountPercentage;
+    String? errorMessage; // Local error state for the modal
 
     showDialog(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setModalState) {
+          void applyDiscount() {
+            final textVal = valueCtrl.text.trim();
+            if (textVal.isEmpty) {
+              setState(() {
+                _discountValue = 0.0;
+                _isDiscountPercentage = isPercent;
+                _discountReason = '';
+              });
+              Navigator.pop(dialogContext);
+              return;
+            }
+
+            final val = double.tryParse(textVal);
+            if (val == null || val < 0) {
+              setModalState(
+                () => errorMessage = 'Please enter a valid positive number.',
+              );
+              return;
+            }
+            if (isPercent && val > 100) {
+              setModalState(
+                () => errorMessage = 'Percentage cannot exceed 100%.',
+              );
+              return;
+            }
+
+            setState(() {
+              _discountValue = val;
+              _isDiscountPercentage = isPercent;
+              _discountReason = reasonCtrl.text;
+            });
+            Navigator.pop(dialogContext);
+          }
+
           return Dialog(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
@@ -361,12 +396,27 @@ await widget.controller.createCustomerOrder(
                       ),
                     ),
                     const SizedBox(height: 16),
+
+                    // Display Local Error Message
+                    if (errorMessage != null) ...[
+                      Text(
+                        errorMessage!,
+                        style: const TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+
                     TextField(
                       controller: valueCtrl,
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
                       style: const TextStyle(fontWeight: FontWeight.bold),
+                      onSubmitted: (_) => applyDiscount(),
                       decoration: InputDecoration(
                         prefixText: isPercent ? "" : "₱ ",
                         prefixStyle: const TextStyle(
@@ -396,6 +446,7 @@ await widget.controller.createCustomerOrder(
                     TextField(
                       controller: reasonCtrl,
                       style: const TextStyle(color: Colors.white, fontSize: 14),
+                      onSubmitted: (_) => applyDiscount(),
                       decoration: InputDecoration(
                         hintText: "Reason (Optional)",
                         hintStyle: TextStyle(color: Colors.grey.shade400),
@@ -423,15 +474,7 @@ await widget.controller.createCustomerOrder(
                           ),
                           elevation: 0,
                         ),
-                        onPressed: () {
-                          final val = double.tryParse(valueCtrl.text) ?? 0.0;
-                          setState(() {
-                            _discountValue = val;
-                            _isDiscountPercentage = isPercent;
-                            _discountReason = reasonCtrl.text;
-                          });
-                          Navigator.pop(dialogContext);
-                        },
+                        onPressed: applyDiscount,
                         child: const Text(
                           "Apply Discount",
                           style: TextStyle(
@@ -452,7 +495,7 @@ await widget.controller.createCustomerOrder(
     );
   }
 
-  Future<bool?> _showPaymentDialog({
+  Future<Map<String, dynamic>?> _showPaymentDialog({
     required double subtotal,
     required double discountAmt,
     required double totalDue,
@@ -463,7 +506,7 @@ await widget.controller.createCustomerOrder(
     final cashCtrl = TextEditingController();
     double cashReceived = 0.0;
 
-    return showDialog<bool>(
+    return showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
@@ -558,31 +601,14 @@ await widget.controller.createCustomerOrder(
                       child: Column(
                         children: [
                           Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Subtotal',
-                              style: TextStyle(fontSize: 12),
-                            ),
-                            Text(
-                              '₱${subtotal.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                        
-                        // Only show the discount row if a discount was applied
-                        if (discountAmt > 0) ...[
-                          const SizedBox(height: 4),
-                          Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text('Discount', style: TextStyle(fontSize: 12)),
+                              const Text(
+                                'Subtotal',
+                                style: TextStyle(fontSize: 12),
+                              ),
                               Text(
-                                "-₱${discountAmt.toStringAsFixed(2)}",
+                                '₱${subtotal.toStringAsFixed(2)}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12,
@@ -590,29 +616,47 @@ await widget.controller.createCustomerOrder(
                               ),
                             ],
                           ),
-                        ],
-                        
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'TOTAL',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 14,
-                              ),
-                            ),
-                            Text(
-                              // Use the actual totalAmount from the database
-                              "₱${totalDue.toStringAsFixed(2)}",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 14,
-                              ),
+
+                          if (discountAmt > 0) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Discount',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                Text(
+                                  "-₱${discountAmt.toStringAsFixed(2)}",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
-                        ),
+
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'TOTAL',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                "₱${totalDue.toStringAsFixed(2)}",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -658,22 +702,48 @@ await widget.controller.createCustomerOrder(
                                   const TextInputType.numberWithOptions(
                                     decimal: true,
                                   ),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'^\d*\.?\d*'),
+                                ), // Blocks letters completely
+                              ],
                               textAlign: TextAlign.right,
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: Colors.black87,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
                               ),
                               decoration: InputDecoration(
+                                hintText: "0.00",
+                                hintStyle: TextStyle(
+                                  color: Colors.grey.shade400,
+                                  fontWeight: FontWeight.normal,
+                                ),
                                 filled: true,
-                                fillColor: const Color(0xFF374151),
+                                fillColor: Colors
+                                    .transparent, // Transparent as requested
                                 contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 12,
                                   vertical: 8,
                                 ),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(6),
-                                  borderSide: BorderSide.none,
+                                  borderSide: BorderSide(
+                                    color: Colors.grey.shade400,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey.shade400,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  borderSide: const BorderSide(
+                                    color: Colors.orange,
+                                    width: 2,
+                                  ), // Highlighting the input
                                 ),
                                 isDense: true,
                               ),
@@ -752,7 +822,7 @@ await widget.controller.createCustomerOrder(
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: () => Navigator.pop(context, false),
+                            onPressed: () => Navigator.pop(context, null),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.black87,
                               side: BorderSide(color: Colors.grey.shade300),
@@ -771,7 +841,16 @@ await widget.controller.createCustomerOrder(
                                 (paymentMode == 'Cash' &&
                                     cashReceived < totalDue)
                                 ? null
-                                : () => Navigator.pop(context, true),
+                                : () => Navigator.pop(context, {
+                                    'confirmed': true,
+                                    'paymentMode': paymentMode,
+                                    'cashReceived': paymentMode == 'Cash'
+                                        ? cashReceived
+                                        : totalDue,
+                                    'change': paymentMode == 'Cash'
+                                        ? (cashReceived - totalDue)
+                                        : 0.0,
+                                  }),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
                               disabledBackgroundColor: Colors.green.shade200,
@@ -802,8 +881,12 @@ await widget.controller.createCustomerOrder(
     );
   }
 
-  // ── Receipt Dialog ─────────────────────────────────────────────────────────
-  void _showReceiptDialog(CustomerOrder o) {
+  void _showReceiptDialog(
+    CustomerOrder o, {
+    String? paymentMode,
+    double? cashReceived,
+    double? change,
+  }) {
     double subtotal = 0;
     List<Widget> itemRows = [];
 
@@ -940,7 +1023,7 @@ await widget.controller.createCustomerOrder(
                 ),
               ),
 
-              // Body - WRAPPED IN FLEXIBLE AND SINGLECHILDSCROLLVIEW TO FIX OVERFLOW
+              // Body
               Flexible(
                 child: SingleChildScrollView(
                   child: Padding(
@@ -1033,6 +1116,28 @@ await widget.controller.createCustomerOrder(
                         const SizedBox(height: 16),
                         const _DashedDivider(),
                         const SizedBox(height: 16),
+
+                        // Exact ordered requested layout for total metrics
+                        if (paymentMode == 'Cash' && cashReceived != null) ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Cash Given',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              Text(
+                                '₱${cashReceived.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                        ],
+
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -1049,14 +1154,16 @@ await widget.controller.createCustomerOrder(
                             ),
                           ],
                         ),
-                        
-                        // Only show the discount row if a discount was applied
+
                         if (o.discountAmount > 0) ...[
                           const SizedBox(height: 4),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text('Discount', style: TextStyle(fontSize: 12)),
+                              const Text(
+                                'Discount',
+                                style: TextStyle(fontSize: 12),
+                              ),
                               Text(
                                 '-₱${o.discountAmount.toStringAsFixed(2)}',
                                 style: const TextStyle(
@@ -1067,7 +1174,7 @@ await widget.controller.createCustomerOrder(
                             ],
                           ),
                         ],
-                        
+
                         const SizedBox(height: 12),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1080,7 +1187,6 @@ await widget.controller.createCustomerOrder(
                               ),
                             ),
                             Text(
-                              // Use the actual totalAmount from the database here
                               '₱${o.totalAmount.toStringAsFixed(2)}',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w900,
@@ -1089,6 +1195,56 @@ await widget.controller.createCustomerOrder(
                             ),
                           ],
                         ),
+
+                        if (paymentMode == 'Cash' && change != null) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Change',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.green,
+                                ),
+                              ),
+                              Text(
+                                '₱${change.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  color: Colors.green,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+
+                        if (paymentMode != null) ...[
+                          const SizedBox(height: 16),
+                          const _DashedDivider(),
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Mode of Payment',
+                                style: TextStyle(
+                                  color: Colors.grey.shade600,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              Text(
+                                paymentMode,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+
                         const SizedBox(height: 24),
                         Text(
                           'Thank you for your purchase!',
@@ -1125,10 +1281,13 @@ await widget.controller.createCustomerOrder(
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () {
-                          Navigator.pop(
-                            context,
-                          ); // Closes the current receipt dialog
-                          _showQRModal(o.id); // Opens the new QR modal
+                          Navigator.pop(context);
+                          _showQRModal(
+                            o.id,
+                            paymentMode: paymentMode,
+                            cashReceived: cashReceived,
+                            change: change,
+                          );
                         },
                         icon: const Icon(
                           LucideIcons.qrCode,
@@ -1180,10 +1339,26 @@ await widget.controller.createCustomerOrder(
     );
   }
 
-  void _showQRModal(String orderId) {
-    // Your live Netlify URL with the order ID parameter attached
-    final String publicReceiptUrl =
+
+  void _showQRModal(
+    String orderId, {
+    String? paymentMode,
+    double? cashReceived,
+    double? change,
+  }) {
+    String publicReceiptUrl =
         "https://inventoryplusreceipt.netlify.app/?id=$orderId";
+
+    // Append payment parameters so the digital receipt can display them too
+    if (paymentMode != null) {
+      publicReceiptUrl += "&mode=${Uri.encodeComponent(paymentMode)}";
+    }
+    if (cashReceived != null && cashReceived > 0) {
+      publicReceiptUrl += "&cash=${cashReceived.toStringAsFixed(2)}";
+    }
+    if (change != null && change > 0) {
+      publicReceiptUrl += "&change=${change.toStringAsFixed(2)}";
+    }
 
     showDialog(
       context: context,
@@ -1516,242 +1691,52 @@ await widget.controller.createCustomerOrder(
                                                   ),
                                                   elevation: 0,
                                                 ),
-                                                
-                                                // onPressed: () async {
-                                                //   final confirm = await showDialog<bool>(
-                                                //     context: context,
-                                                //     builder: (context) => Dialog(
-                                                //       shape: RoundedRectangleBorder(
-                                                //         borderRadius:
-                                                //             BorderRadius.circular(
-                                                //               16,
-                                                //             ),
-                                                //       ),
-                                                //       backgroundColor:
-                                                //           Colors.white,
-                                                //       child: SizedBox(
-                                                //         width: 400,
-                                                //         child: Padding(
-                                                //           padding:
-                                                //               const EdgeInsets.all(
-                                                //                 24.0,
-                                                //               ),
-                                                //           child: Column(
-                                                //             mainAxisSize:
-                                                //                 MainAxisSize
-                                                //                     .min,
-                                                //             crossAxisAlignment:
-                                                //                 CrossAxisAlignment
-                                                //                     .start,
-                                                //             children: [
-                                                //               const Text(
-                                                //                 'Confirm Completion',
-                                                //                 style: TextStyle(
-                                                //                   fontSize: 18,
-                                                //                   fontWeight:
-                                                //                       FontWeight
-                                                //                           .bold,
-                                                //                 ),
-                                                //               ),
-                                                //               const SizedBox(
-                                                //                 height: 8,
-                                                //               ),
-                                                //               const Text(
-                                                //                 'Are you sure you want to complete this order?',
-                                                //                 style: TextStyle(
-                                                //                   color: Colors
-                                                //                       .grey,
-                                                //                 ),
-                                                //               ),
-                                                //               const SizedBox(
-                                                //                 height: 16,
-                                                //               ),
-                                                //               Container(
-                                                //                 padding:
-                                                //                     const EdgeInsets.all(
-                                                //                       16,
-                                                //                     ),
-                                                //                 decoration: BoxDecoration(
-                                                //                   border: Border.all(
-                                                //                     color: Colors
-                                                //                         .grey
-                                                //                         .shade200,
-                                                //                   ),
-                                                //                   borderRadius:
-                                                //                       BorderRadius.circular(
-                                                //                         8,
-                                                //                       ),
-                                                //                 ),
-                                                //                 child: Column(
-                                                //                   children: [
-                                                //                     Row(
-                                                //                       children: [
-                                                //                         const Icon(
-                                                //                           LucideIcons
-                                                //                               .check,
-                                                //                           color:
-                                                //                               Colors.green,
-                                                //                           size:
-                                                //                               16,
-                                                //                         ),
-                                                //                         const SizedBox(
-                                                //                           width:
-                                                //                               8,
-                                                //                         ),
-                                                //                         const Text(
-                                                //                           'Payment is received',
-                                                //                           style: TextStyle(
-                                                //                             fontSize:
-                                                //                                 13,
-                                                //                           ),
-                                                //                         ),
-                                                //                       ],
-                                                //                     ),
-                                                //                     const SizedBox(
-                                                //                       height: 8,
-                                                //                     ),
-                                                //                     Row(
-                                                //                       children: [
-                                                //                         const Icon(
-                                                //                           LucideIcons
-                                                //                               .check,
-                                                //                           color:
-                                                //                               Colors.green,
-                                                //                           size:
-                                                //                               16,
-                                                //                         ),
-                                                //                         const SizedBox(
-                                                //                           width:
-                                                //                               8,
-                                                //                         ),
-                                                //                         const Text(
-                                                //                           'Receipt will be generated',
-                                                //                           style: TextStyle(
-                                                //                             fontSize:
-                                                //                                 13,
-                                                //                           ),
-                                                //                         ),
-                                                //                       ],
-                                                //                     ),
-                                                //                   ],
-                                                //                 ),
-                                                //               ),
-                                                //               const SizedBox(
-                                                //                 height: 24,
-                                                //               ),
-                                                //               Row(
-                                                //                 children: [
-                                                //                   Expanded(
-                                                //                     child: OutlinedButton(
-                                                //                       onPressed: () =>
-                                                //                           Navigator.pop(
-                                                //                             context,
-                                                //                             false,
-                                                //                           ),
-                                                //                       style: OutlinedButton.styleFrom(
-                                                //                         foregroundColor:
-                                                //                             Colors.black87,
-                                                //                         side: BorderSide(
-                                                //                           color: Colors
-                                                //                               .grey
-                                                //                               .shade300,
-                                                //                         ),
-                                                //                         shape: RoundedRectangleBorder(
-                                                //                           borderRadius:
-                                                //                               BorderRadius.circular(
-                                                //                                 8,
-                                                //                               ),
-                                                //                         ),
-                                                //                       ),
-                                                //                       child: const Text(
-                                                //                         'Cancel',
-                                                //                       ),
-                                                //                     ),
-                                                //                   ),
-                                                //                   const SizedBox(
-                                                //                     width: 12,
-                                                //                   ),
-                                                //                   Expanded(
-                                                //                     child: ElevatedButton(
-                                                //                       style: ElevatedButton.styleFrom(
-                                                //                         backgroundColor:
-                                                //                             Colors.green,
-                                                //                         shape: RoundedRectangleBorder(
-                                                //                           borderRadius:
-                                                //                               BorderRadius.circular(
-                                                //                                 8,
-                                                //                               ),
-                                                //                         ),
-                                                //                         elevation:
-                                                //                             0,
-                                                //                       ),
-                                                //                       onPressed: () =>
-                                                //                           Navigator.pop(
-                                                //                             context,
-                                                //                             true,
-                                                //                           ),
-                                                //                       child: const Text(
-                                                //                         'Confirm',
-                                                //                         style: TextStyle(
-                                                //                           color:
-                                                //                               Colors.white,
-                                                //                           fontWeight:
-                                                //                               FontWeight.bold,
-                                                //                         ),
-                                                //                       ),
-                                                //                     ),
-                                                //                   ),
-                                                //                 ],
-                                                //               ),
-                                                //             ],
-                                                //           ),
-                                                //         ),
-                                                //       ),
-                                                //     ),
-                                                //   );
-
-                                                //   if (confirm == true) {
-                                                //     await widget.controller
-                                                //         .completeOrder(o);
-                                                //     if (context.mounted) {
-                                                //       Navigator.pop(
-                                                //         dialogContext,
-                                                //       ); // Close pending orders modal
-                                                //       _showReceiptDialog(
-                                                //         o,
-                                                //       ); // Show the final receipt[cite: 15]
-                                                //     }
-                                                //   }
-                                                // },
                                                 onPressed: () async {
-  // Simply read the values directly from your database model!
-  double orderTotal = o.totalAmount;
-  double orderDiscount = o.discountAmount;
-  double orderSubtotal = orderTotal + orderDiscount;
-  
-  double orderQty = 0;
-  for (var item in o.items) {
-     orderQty += item.quantity;
-  }
+                                                  double orderTotal =
+                                                      o.totalAmount;
+                                                  double orderDiscount =
+                                                      o.discountAmount;
+                                                  double orderSubtotal =
+                                                      orderTotal +
+                                                      orderDiscount;
 
-  // Open the Payment Dialog with the exact saved data
-  final confirm = await _showPaymentDialog(
-    subtotal: orderSubtotal,
-    discountAmt: orderDiscount, 
-    totalDue: orderTotal,       
-    itemsCount: o.items.length,
-    totalQty: orderQty,
-  );
+                                                  double orderQty = 0;
+                                                  for (var item in o.items) {
+                                                    orderQty += item.quantity;
+                                                  }
 
-  // Complete and show receipt
-  if (confirm == true) {
-    await widget.controller.completeOrder(o);
-    if (context.mounted) {
-      Navigator.pop(context); 
-      _showReceiptDialog(o);  
-    }
-  }
-},
+                                                  final paymentData =
+                                                      await _showPaymentDialog(
+                                                        subtotal: orderSubtotal,
+                                                        discountAmt:
+                                                            orderDiscount,
+                                                        totalDue: orderTotal,
+                                                        itemsCount:
+                                                            o.items.length,
+                                                        totalQty: orderQty,
+                                                      );
+
+                                                  if (paymentData != null &&
+                                                      paymentData['confirmed'] ==
+                                                          true) {
+                                                    await widget.controller
+                                                        .completeOrder(o);
+                                                    if (context.mounted) {
+                                                      Navigator.pop(
+                                                        dialogContext,
+                                                      );
+                                                      _showReceiptDialog(
+                                                        o,
+                                                        paymentMode:
+                                                            paymentData['paymentMode'],
+                                                        cashReceived:
+                                                            paymentData['cashReceived'],
+                                                        change:
+                                                            paymentData['change'],
+                                                      );
+                                                    }
+                                                  }
+                                                },
                                               ),
                                             ),
                                           ],

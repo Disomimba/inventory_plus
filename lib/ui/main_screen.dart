@@ -364,81 +364,107 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  // Update 1: Replace _handleLogout to show a confirmation dialog.
   void _handleLogout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
-    if (mounted) {
-      Navigator.pushReplacementNamed(context, '/login');
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Log Out"),
+        content: const Text("Are you sure you want to log out?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Log Out", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
     }
   }
 
   Widget _buildProfileTile() {
-    return InkWell(
-      onTap: () {
-        final isDesktop = MediaQuery.of(context).size.width >= 600;
-        final profilePage = ProfileInfoPage(
-          controller: widget.controller,
-          currentName: widget.controller.currentUserName ?? "Unknown",
-          currentEmail: widget.controller.loggedInUserEmail,
-          userId: widget.controller.currentUserId ?? "",
-          role: widget.controller.currentUserRole ?? "staff",
-        );
-
-        if (isDesktop) {
-          showDialog(
-            context: context,
-            builder: (context) => Dialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              clipBehavior: Clip.antiAlias,
-              child: SizedBox(width: 500, height: 600, child: profilePage),
-            ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        hoverColor: Colors.white.withOpacity(0.05),
+        onTap: () {
+          final isDesktop = MediaQuery.of(context).size.width >= 600;
+          final profilePage = ProfileInfoPage(
+            controller: widget.controller,
+            currentName: widget.controller.currentUserName ?? "Unknown",
+            currentEmail: widget.controller.loggedInUserEmail,
+            userId: widget.controller.currentUserId ?? "",
+            role: widget.controller.currentUserRole ?? "staff",
           );
-        } else {
-          Navigator.push(context, MaterialPageRoute(builder: (context) => profilePage));
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: Colors.white10)),
-        ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: Colors.orange.withOpacity(0.2),
-              child: Text(
-                widget.controller.currentUserName?[0].toUpperCase() ?? 'U',
-                style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
+      
+          if (isDesktop) {
+            showDialog(
+              context: context,
+              builder: (context) => Dialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                clipBehavior: Clip.antiAlias,
+                child: SizedBox(width: 500, height: 600, child: profilePage),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    widget.controller.currentUserName ?? "Unknown User",
-                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    "ID: ${widget.controller.currentUserId}",
-                    style: const TextStyle(color: Colors.grey, fontSize: 10),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+            );
+          } else {
+            Navigator.push(context, MaterialPageRoute(builder: (context) => profilePage));
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: Colors.white10)),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: Colors.orange.withOpacity(0.2),
+                child: Text(
+                  widget.controller.currentUserName?[0].toUpperCase() ?? 'U',
+                  style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
-            IconButton(
-              icon: const Icon(LucideIcons.logOut, color: Colors.redAccent, size: 20),
-              onPressed: _handleLogout,
-              tooltip: "Logout",
-            ),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.controller.currentUserName ?? "Unknown User",
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      "ID: ${widget.controller.currentUserId}",
+                      style: const TextStyle(color: Colors.grey, fontSize: 10),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(LucideIcons.logOut, color: Colors.redAccent, size: 20),
+                onPressed: _handleLogout,
+                tooltip: "Logout",
+              ),
+            ],
+          ),
         ),
       ),
     );
