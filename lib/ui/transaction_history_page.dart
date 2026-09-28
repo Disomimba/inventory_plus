@@ -44,7 +44,6 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           .eq('location_id', locId)
           .order('created_at', ascending: false);
 
-      // Collect all unique user IDs (both cashier and helper)
       final allUserIds = orders
           .expand((o) {
             final createdBy = o['created_by'];
@@ -56,7 +55,6 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           .toSet()
           .toList();
 
-      // Single batch fetch for all names
       Map<dynamic, String> profileNames = {};
       if (allUserIds.isNotEmpty) {
         final profiles = await widget.controller.supabase
@@ -78,7 +76,6 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
         final items = rawItems.map((i) {
           final parsedItem = _OrderLineItem.fromJson(i as Map<String, dynamic>);
           
-          // Look up the price from the active inventory list
           double itemPrice = parsedItem.price;
           if (itemPrice == 0.0) {
             try {
@@ -95,25 +92,26 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           );
         }).toList();
 
-        // --- NEW CALCULATION LOGIC ---
-        // Calculate the pure subtotal directly from the item prices and quantities
         double calculatedSubtotal = items.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
-
-        // Get the final total paid from the DB (fallback to subtotal if missing)
         double totalAmount = (order['total_amount'] as num?)?.toDouble() ?? calculatedSubtotal;
         
-        // Calculate discount (or pull from DB if you have a discount column)
         double discount = (order['discount_amount'] as num?)?.toDouble() ?? (calculatedSubtotal - totalAmount);
-        if (discount < 0) discount = 0.0; // Prevent negative discounts
-        // -----------------------------
+        if (discount < 0) discount = 0.0;
+
+        double cashGiven = (order['cash_given'] as num?)?.toDouble() ?? 0.0;
+        double changeAmount = (order['change_amount'] as num?)?.toDouble() ?? 0.0;
+        String paymentMode = order['payment_mode'] as String? ?? 'N/A';
 
         groups.add(_OrderGroup(
           id: order['id'].toString(),
           status: status,
           createdAt: createdAt,
           totalAmount: totalAmount,
-          subtotal: calculatedSubtotal, // NEW
-          discount: discount,           // NEW
+          subtotal: calculatedSubtotal, 
+          discount: discount,           
+          cashGiven: cashGiven,         
+          changeAmount: changeAmount,   
+          paymentMode: paymentMode,     
           items: items,
           createdBy: order['created_by'] != null
               ? profileNames[order['created_by']]
@@ -134,11 +132,10 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, // Changed to solid white for fullscreen
+      backgroundColor: Colors.white, 
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ─── Header ──────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(24.0),
             child: Row(
@@ -179,7 +176,6 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           ),
           Divider(height: 1, color: Colors.grey.shade200),
 
-          // ─── Stats & Content ─────────────────────────────────────
           Expanded(
             child: FutureBuilder<List<_OrderGroup>>(
               future: _groupedFuture,
@@ -195,14 +191,12 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
 
                 final all = snapshot.data ?? [];
                 
-                // Calculate stats for current month
                 final now = DateTime.now();
                 final thisMonth = all.where((g) => g.createdAt.month == now.month && g.createdAt.year == now.year).toList();
                 final totalOrders = thisMonth.length;
                 final pendingOrders = thisMonth.where((g) => g.status == 'pending' || g.status == 'prepared').length;
                 final revenue = thisMonth.where((g) => g.status == 'completed').fold(0.0, (sum, g) => sum + g.totalAmount);
 
-                // Filter list
                 var filtered = _filterStatus == 'All'
                     ? all
                     : all.where((g) => g.status == _filterStatus.toLowerCase()).toList();
@@ -218,7 +212,6 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
 
                 return Column(
                   children: [
-                    // Stats Strip
                     Padding(
                       padding: const EdgeInsets.all(24.0),
                       child: Row(
@@ -233,7 +226,6 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                     ),
                     Divider(height: 1, color: Colors.grey.shade200),
 
-                    // Filters and Search Bar
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
                       child: Row(
@@ -263,24 +255,10 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                               onChanged: (val) => setState(() => _searchQuery = val),
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey.shade300),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: IconButton(
-                              icon: const Icon(LucideIcons.arrowDownUp, size: 16, color: Colors.black87),
-                              onPressed: () {}, 
-                              padding: const EdgeInsets.all(10),
-                              constraints: const BoxConstraints(),
-                            ),
-                          ),
                         ],
                       ),
                     ),
 
-                    // List View
                     Expanded(
                       child: filtered.isEmpty 
                           ? _buildEmptyState()
@@ -446,8 +424,11 @@ class _OrderGroup {
   final String status;
   final DateTime createdAt;
   final double totalAmount;
-  final double subtotal; // NEW
-  final double discount; // NEW
+  final double subtotal; 
+  final double discount; 
+  final double cashGiven;      
+  final double changeAmount;   
+  final String paymentMode;    
   final List<_OrderLineItem> items;
   final String? createdBy;
   final String? preparedBy;
@@ -457,8 +438,11 @@ class _OrderGroup {
     required this.status,
     required this.createdAt,
     required this.totalAmount,
-    required this.subtotal, // NEW
-    required this.discount, // NEW
+    required this.subtotal, 
+    required this.discount, 
+    required this.cashGiven,     
+    required this.changeAmount,  
+    required this.paymentMode,   
     required this.items,
     this.createdBy,
     this.preparedBy,
@@ -472,7 +456,7 @@ class _OrderLineItem {
   final String productId;
   final String productName;
   final int quantity;
-  final double price; // Added price for UI display
+  final double price; 
 
   _OrderLineItem({
     required this.productId,
@@ -500,12 +484,184 @@ class _OrderCard extends StatefulWidget {
   State<_OrderCard> createState() => _OrderCardState();
 }
 
-class _OrderCardState extends State<_OrderCard>
-    with SingleTickerProviderStateMixin {
+class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMixin {
   bool _expanded = false;
 
   void _toggle() {
     setState(() => _expanded = !_expanded);
+  }
+
+  void _showReceiptModal(BuildContext context, _OrderGroup g) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: Colors.white,
+          child: SizedBox(
+            width: 400,
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Receipt Header
+                    const Text(
+                      'INVENTORY PLUS',
+                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.5),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'SPRJ Paint Center - San Pedro, Laguna',
+                      style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+                    ),
+                    const SizedBox(height: 16),
+                    const _DashedDivider(),
+                    const SizedBox(height: 16),
+                    
+                    // Meta info
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Order #', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+                        Text(g.shortId, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Date', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+                        Text(_formatDate(g.createdAt), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Cashier', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+                        Text(g.createdBy ?? "Admin", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const _DashedDivider(),
+                    const SizedBox(height: 16),
+                    
+                    // Items List
+                    ...g.items.map((item) {
+                      double itemTotal = item.price * item.quantity;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(item.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                  Text('${item.quantity} qty x ₱${item.price.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                ],
+                              )
+                            ),
+                            Text('₱${itemTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          ],
+                        ),
+                      );
+                    }),
+                    
+                    const SizedBox(height: 16),
+                    const _DashedDivider(),
+                    const SizedBox(height: 16),
+                    
+                    // Totals
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Subtotal', style: TextStyle(fontSize: 12)),
+                        Text('₱${g.subtotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      ],
+                    ),
+                    if (g.discount > 0) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Discount', style: TextStyle(fontSize: 12)),
+                          Text('-₱${g.discount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('TOTAL', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+                        Text('₱${g.totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+                      ],
+                    ),
+
+                    if (g.status == 'completed') ...[
+                      const SizedBox(height: 16),
+                      const _DashedDivider(),
+                      const SizedBox(height: 16),
+                      if (g.cashGiven > 0) ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Cash Given', style: TextStyle(fontSize: 12)),
+                            Text('₱${g.cashGiven.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                      ],
+                      if (g.changeAmount > 0) ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Change', style: TextStyle(fontSize: 12)),
+                            Text('₱${g.changeAmount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                      ],
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Mode of Payment', style: TextStyle(fontSize: 12)),
+                          Text(g.paymentMode, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        ],
+                      ),
+                    ],
+
+                    const SizedBox(height: 24),
+                    Text('Thank you for your purchase!', style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontStyle: FontStyle.italic)),
+                    Text('This serves as your official receipt.', style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontStyle: FontStyle.italic)),
+
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.black87,
+                          side: BorderSide(color: Colors.grey.shade300),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: const Text("Close", style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    )
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+    );
   }
 
   @override
@@ -533,7 +689,6 @@ class _OrderCardState extends State<_OrderCard>
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Left color strip[cite: 20]
             Container(
               width: 6,
               color: color,
@@ -544,7 +699,6 @@ class _OrderCardState extends State<_OrderCard>
                 child: ExpansionTile(
                   tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   onExpansionChanged: (expanded) => _toggle(),
-                  // Leading Icon[cite: 20]
                   leading: Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
@@ -553,7 +707,6 @@ class _OrderCardState extends State<_OrderCard>
                     ),
                     child: Icon(_statusIcon(g.status), color: color, size: 18),
                   ),
-                  // Title Area[cite: 20]
                   title: Row(
                     children: [
                       Text(
@@ -571,7 +724,6 @@ class _OrderCardState extends State<_OrderCard>
                       style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                     ),
                   ),
-                  // Trailing Price and Item Count[cite: 20]
                   trailing: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -645,43 +797,21 @@ class _OrderCardState extends State<_OrderCard>
                       ),
                     ),
                     
-                    // --- NEW BREAKDOWN SECTION ---
-                    const SizedBox(height: 12),
-                    Divider(height: 1, color: Colors.grey.shade200),
                     const SizedBox(height: 16),
-                    
-                    // Subtotal
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text("Subtotal", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                        Text("₱${g.subtotal.toStringAsFixed(2)}", style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                      ],
-                    ),
-                    
-                    // Discount (Only shows if discount is greater than 0)
-                    if (g.discount > 0) ...[
-                      const SizedBox(height: 6),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text("Discount", style: TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.w600)),
-                          Text("-₱${g.discount.toStringAsFixed(2)}", style: const TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.bold)),
-                        ],
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _showReceiptModal(context, g),
+                        icon: const Icon(LucideIcons.receipt, size: 16),
+                        label: const Text("Show Receipt", style: TextStyle(fontWeight: FontWeight.bold)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.black87,
+                          side: BorderSide(color: Colors.grey.shade300),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                        ),
                       ),
-                    ],
-                    
-                    const SizedBox(height: 12),
-                    
-                    // Total Paid
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text("Total", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A))),
-                        Text("₱${g.totalAmount.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
-                      ],
                     ),
-                    // -----------------------------
                   ],
                 ),
               ),
@@ -692,8 +822,6 @@ class _OrderCardState extends State<_OrderCard>
     );
   }
 }
-
-// ─── Status chip ──────────────────────────────────────────────────────────────
 
 class _StatusChip extends StatelessWidget {
   final String status;
@@ -720,4 +848,33 @@ class _StatusChip extends StatelessWidget {
 
 extension _StrExt on String {
   String _cap() => isEmpty ? '' : '${this[0].toUpperCase()}${substring(1)}';
+}
+
+class _DashedDivider extends StatelessWidget {
+  const _DashedDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final boxWidth = constraints.constrainWidth();
+        const dashWidth = 5.0;
+        const dashHeight = 1.0;
+        final dashCount = (boxWidth / (2 * dashWidth)).floor();
+        return Flex(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          direction: Axis.horizontal,
+          children: List.generate(dashCount, (_) {
+            return SizedBox(
+              width: dashWidth,
+              height: dashHeight,
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: Colors.grey.shade300),
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
 }

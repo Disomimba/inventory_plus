@@ -85,7 +85,7 @@ class ItemCard extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'SKU: ${item.sku}',
+          '${item.sku}',
           style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
         ),
       ],

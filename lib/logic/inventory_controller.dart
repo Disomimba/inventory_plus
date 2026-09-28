@@ -593,7 +593,14 @@ class InventoryController {
     }
   }
 
-  Future<void> createCustomerOrder(List<CustomerOrderItem> items, {required double totalAmount,required double discountAmount}) async {
+  Future<void> createCustomerOrder(
+    List<CustomerOrderItem> items, {
+    required double totalAmount,
+    required double discountAmount,
+    String? paymentMode,
+    double? cashGiven,
+    double? changeAmount,
+  }) async {
     final locId = activeLocationId;
 
     if (locId == null) {
@@ -606,6 +613,9 @@ class InventoryController {
         'status': 'pending',
         'total_amount': totalAmount,
         'discount_amount': discountAmount,
+        'payment_mode': paymentMode ?? 'Cash', // Save the payment mode
+        'cash_given': cashGiven,
+        'change_amount': changeAmount,
         'items': items.map((i) => i.toJson()).toList(),
         'created_by': currentUserNumericId,
       }).select();
@@ -650,7 +660,12 @@ Stream<List<CustomerOrder>> streamOrders() {
 
   Set<String>? _processingOrders;
 
-  Future<void> completeOrder(CustomerOrder order) async {
+  Future<void> completeOrder(
+    CustomerOrder order, {
+    String? paymentMode,
+    double? cashGiven,
+    double? changeAmount,
+  }) async {
     _processingOrders ??= {};
     if (_processingOrders!.contains(order.id)) return;
     _processingOrders!.add(order.id);
@@ -663,7 +678,19 @@ Stream<List<CustomerOrder>> streamOrders() {
           .single();
       if (checkOrder['status'] == 'completed') return;
 
-      await updateOrderStatus(order.id, 'completed');
+      // Prepare the data payload to update
+      final Map<String, dynamic> updateData = {
+        'status': 'completed',
+      };
+
+      // Add payment data if provided
+      if (paymentMode != null) updateData['payment_mode'] = paymentMode;
+      if (cashGiven != null) updateData['cash_given'] = cashGiven;
+      if (changeAmount != null) updateData['change_amount'] = changeAmount;
+
+      // Update the database
+      await supabase.from('orders').update(updateData).eq('id', order.id);
+      
     } finally {
       _processingOrders!.remove(order.id);
     }

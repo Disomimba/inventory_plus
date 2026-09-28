@@ -1041,7 +1041,7 @@ class _PosCartPageState extends State<PosCartPage>
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Hardware & Tools - Biñan, Laguna',
+                          'SPRJ Paint Center - San Pedro, Laguna',
                           style: TextStyle(
                             color: Colors.grey.shade600,
                             fontSize: 11,
@@ -1717,11 +1717,15 @@ class _PosCartPageState extends State<PosCartPage>
                                                       );
 
                                                   if (paymentData != null &&
-                                                      paymentData['confirmed'] ==
-                                                          true) {
-                                                    await widget.controller
-                                                        .completeOrder(o);
-                                                    if (context.mounted) {
+                                                    paymentData['confirmed'] ==
+                                                        true) {
+                                                  await widget.controller.completeOrder(
+                                                    o,
+                                                    paymentMode: paymentData['paymentMode'],
+                                                    cashGiven: paymentData['cashReceived'],
+                                                    changeAmount: paymentData['change'],
+                                                  );
+                                                  if (context.mounted) {
                                                       Navigator.pop(
                                                         dialogContext,
                                                       );

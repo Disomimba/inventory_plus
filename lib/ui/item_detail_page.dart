@@ -32,6 +32,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   bool _isLoadingHistory = true;
 
   bool _isEditing = false;
+  bool isReadOnly = false;
 
   bool _isSaving = false;
   String? _newImageUrl;
@@ -596,7 +597,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             ],
           ),
           const SizedBox(height: 16),
-          _buildField("SKU", _skuController, _currentItem.sku),
+          _buildField("SKU", _skuController, _currentItem.sku, isReadOnly: true),
           const SizedBox(height: 16),
           _buildField(
             "Description",
@@ -841,12 +842,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     TextEditingController controller,
     String displayValue, {
     bool isMultiline = false,
+    bool isReadOnly = false,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        _isEditing
+        (_isEditing && !isReadOnly)
             ? TextField(
                 controller: controller,
                 maxLines: isMultiline ? null : 1,
