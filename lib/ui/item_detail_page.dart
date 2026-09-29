@@ -647,7 +647,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                             _statusColor(
                               widget.controller.stockStatusFor(_currentItem),
                             ),
-                            _stockController, 
+                            _stockController, isReadOnly: true,
                           ),
                         ],
                       ),
@@ -805,6 +805,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     Color color,
     TextEditingController controller, {
     String? errorKey,
+    bool isReadOnly = false
   }) {
     final error = errorKey == null ? null : _errors[errorKey];
     return Expanded(
@@ -843,7 +844,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                         ),
                       ),
                     ),
-                  _isEditing
+                  (_isEditing && !isReadOnly)
                       ? TextField(
                           controller: controller,
                           keyboardType: TextInputType.number,

@@ -112,14 +112,14 @@ class _InventoryPageState extends State<InventoryPage> {
                           _buildHeaderButton(
                             icon: LucideIcons.download,
                             label: "Export Report",
-                            isNew: true,
+
                             onPressed: () => _showReportDialog(context),
                           ),
                           const SizedBox(width: 8),
                           _buildHeaderButton(
                             icon: LucideIcons.qrCode,
                             label: "QR Labels",
-                            isNew: true,
+
                             onPressed: () => _generateAndPrintQRLabels(context),
                           ),
                           const SizedBox(width: 8),
@@ -304,7 +304,6 @@ class _InventoryPageState extends State<InventoryPage> {
   Widget _buildHeaderButton({
     required IconData icon,
     required String label,
-    required bool isNew,
     required VoidCallback onPressed,
   }) {
     return Stack(
@@ -330,26 +329,6 @@ class _InventoryPageState extends State<InventoryPage> {
             backgroundColor: Colors.white,
           ),
         ),
-        if (isNew)
-          Positioned(
-            top: -6,
-            right: -6,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0xFFDC2626), // Red badge
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Text(
-                "NEW",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
       ],
     );
   }
@@ -594,17 +573,16 @@ class _InventoryPageState extends State<InventoryPage> {
 
         tableRows.add(
           pw.TableRow(
-            children:
-                [
-                      item.sku,
-                      item.name,
-                      beginningQty.toString(),
-                      received.toString(),
-                      issued.toString(),
-                      endingQty.toString(),
-                      'P${item.price.toStringAsFixed(2)}',
-                      'P${totalValue.toStringAsFixed(2)}',
-                    ]
+            children: [
+              item.sku,
+              item.name,
+              '$beginningQty ${item.unit}', // Added unit
+              '$received',
+              '$issued',
+              '$endingQty ${item.unit}',    // Added unit
+              _formatCurrency(item.price),  // Added commas
+              _formatCurrency(totalValue),  // Added commas
+            ]
                     .map(
                       (text) => pw.Padding(
                         padding: const pw.EdgeInsets.all(6),
@@ -829,4 +807,9 @@ class _InventoryPageState extends State<InventoryPage> {
       }
     }
   }
+  String _formatCurrency(double value) {
+  RegExp reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
+  String mathFunc(Match match) => '${match[1]},';
+  return 'P${value.toStringAsFixed(2).replaceAllMapped(reg, mathFunc)}';
+}
 }

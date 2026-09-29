@@ -27,7 +27,7 @@ class _MainScreenState extends State<MainScreen> {
   int? _currentIndex;
   bool _isDetailView = false;
   InventoryItem? _selectedItem;
-
+String _txTargetTab = 'Sales History';
   // --- DESKTOP COLOR PALETTE ---
   static const Color _primaryOrange = Color(0xFFEA580C);
   static const Color _darkSidebarBg = Color(0xFF0F172A);
@@ -139,11 +139,29 @@ class _MainScreenState extends State<MainScreen> {
         final int transactionIndex = isAdmin ? pageIndex++ : -1;
         final int system_settings_page = isAdmin? pageIndex++ : -1;
 
-        // 3. THE MASTER PAGE LIST
         final pages = <Widget>[];
-        
+                 
         if (isAdmin) {
-          pages.add(DashboardPage(controller: widget.controller));
+          pages.add(DashboardPage(
+            controller: widget.controller,
+            onViewTransactions: () {
+              setState(() {
+                _txTargetTab = 'Sales History'; 
+                _currentIndex = transactionIndex;
+              });
+            },
+            onOpenQueue: () { 
+              setState(() {
+                _currentIndex = orderQueueIndex; 
+              });
+            },
+            onViewActivity: () { 
+              setState(() {
+                _txTargetTab = 'Activity Log'; 
+                _currentIndex = transactionIndex;
+              });
+            },
+          ));
         }
         if (isCashier || isAdmin) {
           pages.add(PosCartPage(controller: widget.controller));
@@ -160,7 +178,7 @@ class _MainScreenState extends State<MainScreen> {
         );
 
         if (isAdmin) {
-          pages.add(TransactionHistoryPage(controller: widget.controller));
+          pages.add(TransactionHistoryPage(controller: widget.controller,initialTab: _txTargetTab,));
         }  
 
         if (isAdmin) {

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../logic/inventory_controller.dart';
-
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 class TransactionHistoryPage extends StatefulWidget {
   final InventoryController controller;
-
-  const TransactionHistoryPage({super.key, required this.controller});
+final String initialTab;
+  const TransactionHistoryPage({super.key, required this.controller,this.initialTab = 'Sales History',});
 
   @override
   State<TransactionHistoryPage> createState() => _TransactionHistoryPageState();
@@ -13,16 +15,35 @@ class TransactionHistoryPage extends StatefulWidget {
 
 class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   late Future<List<_OrderGroup>> _groupedFuture;
+
+  
+  // Sales History State
   String _filterStatus = 'All';
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  
+  // Activity Log State
+  late String _activeTab; 
+  List<Map<String, dynamic>> _activityLog = [];
+  bool _isLoadingLog = true;
+  String _logFilter = 'All'; 
 
   @override
   void initState() {
     super.initState();
+    _activeTab = widget.initialTab;
     _load();
   }
-
+@override
+  void didUpdateWidget(TransactionHistoryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If the MainScreen tells us to change tabs, update it!
+    if (widget.initialTab != oldWidget.initialTab) {
+      setState(() {
+        _activeTab = widget.initialTab;
+      });
+    }
+  }
   @override
   void dispose() {
     _searchController.dispose();
@@ -31,6 +52,18 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
 
   void _load() {
     _groupedFuture = _fetchGrouped();
+    _fetchLog();
+  }
+
+  Future<void> _fetchLog() async {
+    setState(() => _isLoadingLog = true);
+    final logs = await widget.controller.fetchAllTransactionHistory();
+    if (mounted) {
+      setState(() {
+        _activityLog = logs;
+        _isLoadingLog = false;
+      });
+    }
   }
 
   Future<List<_OrderGroup>> _fetchGrouped() async {
@@ -48,7 +81,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           .expand((o) {
             final createdBy = o['created_by'];
             final preparedBy = o['prepared_by'];
-            final preparedByInt = preparedBy != null ? int.tryParse(preparedBy.toString()) : null;
+            final preparedByInt = preparedBy != null
+                ? int.tryParse(preparedBy.toString())
+                : null;
             return [createdBy, preparedByInt];
           })
           .where((id) => id != null)
@@ -72,18 +107,20 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
         final status = order['status'] as String? ?? 'pending';
         final createdAt = DateTime.parse(order['created_at']).toLocal();
         final rawItems = order['items'] as List<dynamic>? ?? [];
-        
+
         final items = rawItems.map((i) {
           final parsedItem = _OrderLineItem.fromJson(i as Map<String, dynamic>);
-          
+
           double itemPrice = parsedItem.price;
           if (itemPrice == 0.0) {
             try {
-              final dbItem = widget.controller.allItems.firstWhere((inv) => inv.id == parsedItem.productId);
+              final dbItem = widget.controller.allItems.firstWhere(
+                (inv) => inv.id == parsedItem.productId,
+              );
               itemPrice = dbItem.price;
             } catch (_) {}
           }
-          
+
           return _OrderLineItem(
             productId: parsedItem.productId,
             productName: parsedItem.productName,
@@ -92,34 +129,43 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           );
         }).toList();
 
-        double calculatedSubtotal = items.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
-        double totalAmount = (order['total_amount'] as num?)?.toDouble() ?? calculatedSubtotal;
-        
-        double discount = (order['discount_amount'] as num?)?.toDouble() ?? (calculatedSubtotal - totalAmount);
+        double calculatedSubtotal = items.fold(
+          0.0,
+          (sum, item) => sum + (item.price * item.quantity),
+        );
+        double totalAmount =
+            (order['total_amount'] as num?)?.toDouble() ?? calculatedSubtotal;
+
+        double discount =
+            (order['discount_amount'] as num?)?.toDouble() ??
+            (calculatedSubtotal - totalAmount);
         if (discount < 0) discount = 0.0;
 
         double cashGiven = (order['cash_given'] as num?)?.toDouble() ?? 0.0;
-        double changeAmount = (order['change_amount'] as num?)?.toDouble() ?? 0.0;
+        double changeAmount =
+            (order['change_amount'] as num?)?.toDouble() ?? 0.0;
         String paymentMode = order['payment_mode'] as String? ?? 'N/A';
 
-        groups.add(_OrderGroup(
-          id: order['id'].toString(),
-          status: status,
-          createdAt: createdAt,
-          totalAmount: totalAmount,
-          subtotal: calculatedSubtotal, 
-          discount: discount,           
-          cashGiven: cashGiven,         
-          changeAmount: changeAmount,   
-          paymentMode: paymentMode,     
-          items: items,
-          createdBy: order['created_by'] != null
-              ? profileNames[order['created_by']]
-              : null,
-          preparedBy: order['prepared_by'] != null
-              ? profileNames[int.tryParse(order['prepared_by'].toString())]
-              : null,
-        ));
+        groups.add(
+          _OrderGroup(
+            id: order['id'].toString(),
+            status: status,
+            createdAt: createdAt,
+            totalAmount: totalAmount,
+            subtotal: calculatedSubtotal,
+            discount: discount,
+            cashGiven: cashGiven,
+            changeAmount: changeAmount,
+            paymentMode: paymentMode,
+            items: items,
+            createdBy: order['created_by'] != null
+                ? profileNames[order['created_by']]
+                : null,
+            preparedBy: order['prepared_by'] != null
+                ? profileNames[int.tryParse(order['prepared_by'].toString())]
+                : null,
+          ),
+        );
       }
 
       return groups;
@@ -129,10 +175,24 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     }
   }
 
+  String _formatLogDateGroup(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final target = DateTime(date.year, date.month, date.day);
+
+    const months = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+    final dateString = "${months[date.month - 1]} ${date.day}, ${date.year}";
+
+    if (target == today) return "TODAY — $dateString";
+    if (target == yesterday) return "YESTERDAY — $dateString";
+    return dateString;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, 
+      backgroundColor: Colors.white,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -144,32 +204,76 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Transaction History',
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    Text(
+                      _activeTab == 'Sales History' ? 'Transaction History' : 'Activity Log',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF0F172A),
+                      ),
                     ),
-                    FutureBuilder<List<_OrderGroup>>(
-                      future: _groupedFuture,
-                      builder: (context, snapshot) {
-                        final count = snapshot.data?.where((g) => g.createdAt.month == DateTime.now().month && g.createdAt.year == DateTime.now().year).length ?? 0;
-                        return Text(
-                          '$count orders this month',
-                          style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-                        );
-                      }
-                    ),
+                    if (_activeTab == 'Sales History')
+                      FutureBuilder<List<_OrderGroup>>(
+                        future: _groupedFuture,
+                        builder: (context, snapshot) {
+                          final count = snapshot.data
+                                  ?.where(
+                                    (g) =>
+                                        g.createdAt.month == DateTime.now().month &&
+                                        g.createdAt.year == DateTime.now().year,
+                                  )
+                                  .length ?? 0;
+                          return Text(
+                            '$count orders this month',
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 13,
+                            ),
+                          );
+                        },
+                      )
+                    else
+                      Text(
+                        '${_activityLog.length} inventory changes this month',
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                      ),
                   ],
                 ),
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade200),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: IconButton(
-                    icon: const Icon(LucideIcons.refreshCw, size: 18, color: Colors.black87),
-                    onPressed: () => setState(() => _load()),
-                    tooltip: 'Refresh',
-                  ),
+                Row(
+                  children: [
+                    // Only show Export button on the Sales History tab
+                    if (_activeTab == 'Sales History') ...[
+                      OutlinedButton.icon(
+                        onPressed: () => _showSalesReportDialog(context),
+                        icon: const Icon(LucideIcons.download, size: 16),
+                        label: const Text("Export Sales", style: TextStyle(fontWeight: FontWeight.bold)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.black87,
+                          side: BorderSide(color: Colors.grey.shade300),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade200),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          LucideIcons.refreshCw,
+                          size: 18,
+                          color: Colors.black87,
+                        ),
+                        onPressed: () => setState(() => _load()),
+                        tooltip: 'Refresh',
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -180,29 +284,23 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             child: FutureBuilder<List<_OrderGroup>>(
               future: _groupedFuture,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(color: Colors.orange),
-                  );
+                if (snapshot.connectionState == ConnectionState.waiting && _activeTab == 'Sales History') {
+                  return const Center(child: CircularProgressIndicator(color: Colors.orange));
                 }
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
-
-                final all = snapshot.data ?? [];
                 
+                final all = snapshot.data ?? [];
+
+                // Sales Stats
                 final now = DateTime.now();
                 final thisMonth = all.where((g) => g.createdAt.month == now.month && g.createdAt.year == now.year).toList();
                 final totalOrders = thisMonth.length;
                 final pendingOrders = thisMonth.where((g) => g.status == 'pending' || g.status == 'prepared').length;
                 final revenue = thisMonth.where((g) => g.status == 'completed').fold(0.0, (sum, g) => sum + g.totalAmount);
 
-                var filtered = _filterStatus == 'All'
-                    ? all
-                    : all.where((g) => g.status == _filterStatus.toLowerCase()).toList();
-                    
-                if (_searchQuery.isNotEmpty) {
-                  filtered = filtered.where((g) {
+                var filteredOrders = _filterStatus == 'All' ? all : all.where((g) => g.status == _filterStatus.toLowerCase()).toList();
+
+                if (_searchQuery.isNotEmpty && _activeTab == 'Sales History') {
+                  filteredOrders = filteredOrders.where((g) {
                     final query = _searchQuery.toLowerCase();
                     final matchId = g.id.toLowerCase().contains(query);
                     final matchItem = g.items.any((item) => item.productName.toLowerCase().contains(query));
@@ -210,34 +308,61 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                   }).toList();
                 }
 
+                // Activity Log Stats
+                int stockInTotal = 0;
+                int stockOutTotal = 0;
+                for (var tx in _activityLog) {
+                  num qty = tx['quantity_change'] ?? 0;
+                  if (qty > 0) stockInTotal += qty.toInt();
+                  if (qty < 0) stockOutTotal += qty.toInt().abs();
+                }
+
                 return Column(
                   children: [
+                    // --- DYNAMIC METRICS CARDS ---
                     Padding(
                       padding: const EdgeInsets.all(24.0),
                       child: Row(
                         children: [
-                          _buildStatCard("TOTAL ORDERS", "$totalOrders", Colors.black87),
-                          const SizedBox(width: 16),
-                          _buildStatCard("PENDING", "$pendingOrders", Colors.orange),
-                          const SizedBox(width: 16),
-                          _buildStatCard("REVENUE (MONTH)", "₱${revenue.toStringAsFixed(2)}", Colors.green),
+                          if (_activeTab == 'Sales History') ...[
+                            _buildStatCard("TOTAL ORDERS", "$totalOrders", Colors.black87),
+                            const SizedBox(width: 16),
+                            _buildStatCard("PENDING", "$pendingOrders", Colors.orange),
+                            const SizedBox(width: 16),
+                            _buildStatCard("REVENUE (MONTH)", "₱${revenue.toStringAsFixed(2)}", Colors.green),
+                          ] else ...[
+                            _buildStatCard("TOTAL CHANGES", "${_activityLog.length}", Colors.black87),
+                            const SizedBox(width: 16),
+                            _buildStatCard("STOCK IN", "+$stockInTotal", Colors.green),
+                            const SizedBox(width: 16),
+                            _buildStatCard("STOCK OUT", "-$stockOutTotal", Colors.red),
+                          ]
                         ],
                       ),
                     ),
                     Divider(height: 1, color: Colors.grey.shade200),
-
+                    
+                    // --- TABS & FILTERS ---
+                    Padding(
+                      padding: const EdgeInsets.only(left: 24.0, right: 24.0, top: 16.0),
+                      child: _buildTabToggle(),
+                    ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
                       child: Row(
                         children: [
-                          _buildFilterPills(),
+                          if (_activeTab == 'Sales History') 
+                            _buildFilterPills()
+                          else 
+                            _buildLogFilterPills(),
+
                           const Spacer(),
                           SizedBox(
                             width: 280,
                             child: TextField(
                               controller: _searchController,
                               decoration: InputDecoration(
-                                hintText: 'Search order # or item...',
+                                hintText: _activeTab == 'Sales History' ? 'Search order # or item...' : 'Search item name...',
                                 hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
                                 prefixIcon: Icon(LucideIcons.search, size: 16, color: Colors.grey.shade500),
                                 filled: true,
@@ -259,15 +384,11 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                       ),
                     ),
 
+                    // --- CONDITIONALLY RENDER THE LIST ---
                     Expanded(
-                      child: filtered.isEmpty 
-                          ? _buildEmptyState()
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                              itemCount: filtered.length,
-                              itemBuilder: (context, index) =>
-                                  _OrderCard(group: filtered[index]),
-                            ),
+                      child: _activeTab == 'Activity Log'
+                          ? _buildActivityLogList()
+                          : _buildSalesHistoryList(filteredOrders),
                     ),
                   ],
                 );
@@ -275,6 +396,51 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTabToggle() {
+    return Row(
+      children: [
+        _buildTabButton('Sales History', LucideIcons.receipt),
+        const SizedBox(width: 8),
+        _buildTabButton('Activity Log', LucideIcons.history),
+      ],
+    );
+  }
+
+  Widget _buildTabButton(String title, IconData icon) {
+    final isSelected = _activeTab == title;
+    return InkWell(
+      onTap: () => setState(() => _activeTab = title),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF0F172A) : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF0F172A) : Colors.grey.shade300,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: isSelected ? Colors.white : Colors.grey.shade700,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Colors.grey.shade700,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -292,8 +458,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
               color: Colors.black.withOpacity(0.02),
               blurRadius: 4,
               offset: const Offset(0, 2),
-            )
-          ]
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,8 +503,12 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
               decoration: BoxDecoration(
                 color: isSelected ? Colors.white : Colors.transparent,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: isSelected ? Colors.grey.shade300 : Colors.transparent),
-                boxShadow: isSelected ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)] : [],
+                border: Border.all(
+                  color: isSelected ? Colors.grey.shade300 : Colors.transparent,
+                ),
+                boxShadow: isSelected
+                    ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)]
+                    : [],
               ),
               child: Text(
                 f,
@@ -355,6 +525,564 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     );
   }
 
+  Widget _buildLogFilterPills() {
+    final filters = ['All', 'Stock In', 'Stock Out', 'Adjustments'];
+    return Row(
+      children: filters.map((f) {
+        final isSelected = _logFilter == f;
+        return Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: GestureDetector(
+            onTap: () => setState(() => _logFilter = f),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isSelected ? Colors.grey.shade300 : Colors.transparent,
+                ),
+                boxShadow: isSelected
+                    ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)]
+                    : [],
+              ),
+              child: Text(
+                f,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  color: isSelected ? Colors.black87 : Colors.grey.shade600,
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+Widget _buildSalesHistoryList(List<_OrderGroup> filteredOrders) {
+    if (filteredOrders.isEmpty) return _buildEmptyState();
+
+    // Group the orders by Date
+    Map<String, List<_OrderGroup>> groupedOrders = {};
+    for (var order in filteredOrders) {
+      final dateKey = _formatLogDateGroup(order.createdAt);
+      if (!groupedOrders.containsKey(dateKey)) {
+        groupedOrders[dateKey] = [];
+      }
+      groupedOrders[dateKey]!.add(order);
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      itemCount: groupedOrders.length,
+      itemBuilder: (context, index) {
+        final dateKey = groupedOrders.keys.elementAt(index);
+        final orders = groupedOrders[dateKey]!;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0, bottom: 12.0),
+              child: Text(
+                dateKey,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade600,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ),
+            // Build the cards for this specific date group
+            ...orders.map((order) => _OrderCard(group: order)),
+          ],
+        );
+      },
+    );
+  }
+  Widget _buildActivityLogList() {
+    if (_isLoadingLog) {
+      return const Center(child: CircularProgressIndicator(color: Colors.orange));
+    }
+
+    var filteredLogs = _activityLog;
+
+    // Apply Filter Pill
+    if (_logFilter != 'All') {
+      filteredLogs = filteredLogs.where((tx) {
+        final num qty = tx['quantity_change'] ?? 0;
+        final type = tx['transaction_type'] as String;
+        if (_logFilter == 'Stock In') return qty > 0;
+        if (_logFilter == 'Stock Out') return qty < 0;
+        if (_logFilter == 'Adjustments') return type == 'manual_adjustment';
+        return true;
+      }).toList();
+    }
+
+    // Apply Search
+    if (_searchQuery.isNotEmpty) {
+      filteredLogs = filteredLogs.where((tx) {
+        final pName = (tx['products']?['product_name'] ?? "").toString().toLowerCase();
+        return pName.contains(_searchQuery.toLowerCase());
+      }).toList();
+    }
+
+    if (filteredLogs.isEmpty) {
+      return const Center(child: Text("No activity found.", style: TextStyle(color: Colors.grey)));
+    }
+
+    // Group by Date
+    Map<String, List<Map<String, dynamic>>> groupedLogs = {};
+    for (var tx in filteredLogs) {
+      final date = DateTime.parse(tx['created_at']).toLocal();
+      final dateKey = _formatLogDateGroup(date);
+      if (!groupedLogs.containsKey(dateKey)) {
+        groupedLogs[dateKey] = [];
+      }
+      groupedLogs[dateKey]!.add(tx);
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      itemCount: groupedLogs.length,
+      itemBuilder: (context, index) {
+        final dateKey = groupedLogs.keys.elementAt(index);
+        final txs = groupedLogs[dateKey]!;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
+              child: Text(
+                dateKey,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade600,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ),
+            ...txs.map((tx) {
+              final isPositive = (tx['quantity_change'] as num) > 0;
+              final type = tx['transaction_type'] as String;
+              final pName = tx['products']?['product_name'] ?? "Unknown Item";
+              final uName = tx['profiles']?['name'] ?? "Admin";
+              
+              final date = DateTime.parse(tx['created_at']).toLocal();
+              final timeStr = "${date.hour > 12 ? date.hour - 12 : (date.hour == 0 ? 12 : date.hour)}:${date.minute.toString().padLeft(2, '0')} ${date.hour >= 12 ? 'PM' : 'AM'}";
+              
+              Color typeColor = isPositive ? Colors.green : Colors.red;
+              if (type == 'manual_adjustment') typeColor = Colors.blue;
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: typeColor.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        isPositive ? LucideIcons.plus : LucideIcons.minus,
+                        size: 14,
+                        color: typeColor,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  pName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    color: Color(0xFF0F172A),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: typeColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  type.toUpperCase().replaceAll('_', ' '),
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: typeColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "$uName · $timeStr",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          "${isPositive ? '+' : ''}${tx['quantity_change']}",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16,
+                            color: typeColor,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "New qty: ${tx['new_quantity']}",
+                          style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        );
+      },
+    );
+  }
+void _showSalesReportDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        String selectedPeriod = 'Daily';
+        return StatefulBuilder(
+          builder: (stateContext, setState) {
+            return Dialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Container(
+                width: 450,
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          "Generate Sales Report",
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(LucideIcons.x, color: Colors.grey),
+                          onPressed: () => Navigator.pop(dialogContext),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Select the report period:',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: selectedPeriod,
+                          isExpanded: true,
+                          icon: const Icon(LucideIcons.chevronDown, size: 18),
+                          items: ['Daily', 'Weekly', 'Monthly'].map((
+                            String value,
+                          ) {
+                            return DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(
+                                value,
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (newValue) {
+                            if (newValue != null) {
+                              setState(() => selectedPeriod = newValue);
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        OutlinedButton(
+                          onPressed: () => Navigator.pop(stateContext),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.black87,
+                            side: BorderSide(color: Colors.grey.shade300),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 14,
+                              horizontal: 24,
+                            ),
+                          ),
+                          child: const Text("Cancel"),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(stateContext);
+                            _generateAndPrintSalesReport(context, selectedPeriod);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 14,
+                              horizontal: 32,
+                            ),
+                            elevation: 0,
+                          ),
+                          child: const Text(
+                            "Generate PDF",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _generateAndPrintSalesReport(
+    BuildContext context,
+    String period,
+  ) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => const Center(child: CircularProgressIndicator(color: Colors.orange)),
+    );
+
+    try {
+      DateTime now = DateTime.now();
+      DateTime cutoffDate;
+      if (period == 'Daily') {
+        cutoffDate = DateTime(now.year, now.month, now.day);
+      } else if (period == 'Weekly') {
+        cutoffDate = now.subtract(const Duration(days: 7));
+      } else {
+        cutoffDate = now.subtract(const Duration(days: 30));
+      }
+
+      // Grab exactly the orders shown in the UI
+      final allGroups = await _groupedFuture;
+      
+      // Filter for COMPLETED sales within the timeframe
+      final periodSales = allGroups.where((g) {
+        return g.status == 'completed' && g.createdAt.isAfter(cutoffDate);
+      }).toList();
+
+      if (periodSales.isEmpty) {
+        if (context.mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No completed sales found for this period.'), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
+
+      double grossSales = 0.0;
+      double totalDiscounts = 0.0;
+      double netRevenue = 0.0;
+
+      final tableRows = <pw.TableRow>[];
+      tableRows.add(
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+          children: [
+            'Order #', 'Date', 'Cashier', 'Payment', 'Subtotal', 'Discount', 'Total'
+          ].map((text) => pw.Padding(
+            padding: const pw.EdgeInsets.all(6),
+            child: pw.Text(text, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
+          )).toList(),
+        ),
+      );
+
+      String fmtPdf(double val) {
+        RegExp reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
+        String mathFunc(Match match) => '${match[1]},';
+        return 'P${val.toStringAsFixed(2).replaceAllMapped(reg, mathFunc)}';
+      }
+
+      for (var sale in periodSales) {
+        grossSales += sale.subtotal;
+        totalDiscounts += sale.discount;
+        netRevenue += sale.totalAmount;
+
+        final timeStr = "${sale.createdAt.hour > 12 ? sale.createdAt.hour - 12 : (sale.createdAt.hour == 0 ? 12 : sale.createdAt.hour)}:${sale.createdAt.minute.toString().padLeft(2, '0')} ${sale.createdAt.hour >= 12 ? 'PM' : 'AM'}";
+        final dateStr = "${sale.createdAt.month}/${sale.createdAt.day}/${sale.createdAt.year} $timeStr";
+
+        tableRows.add(
+          pw.TableRow(
+            children: [
+              sale.shortId,
+              dateStr,
+              sale.createdBy ?? "Admin",
+              sale.paymentMode,
+              fmtPdf(sale.subtotal),
+              sale.discount > 0 ? fmtPdf(sale.discount) : '-',
+              fmtPdf(sale.totalAmount),
+            ].map((text) => pw.Padding(
+              padding: const pw.EdgeInsets.all(6),
+              child: pw.Text(text, style: const pw.TextStyle(fontSize: 10)),
+            )).toList(),
+          ),
+        );
+      }
+
+      final doc = pw.Document();
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          build: (pw.Context context) {
+            return [
+              pw.Header(
+                level: 0,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('SPRJ Paint Center', style: pw.TextStyle(fontSize: 12, color: PdfColors.grey700, fontWeight: pw.FontWeight.bold)),
+                        pw.SizedBox(height: 4),
+                        pw.Text('Sales Summary Report', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                        pw.SizedBox(height: 4),
+                        pw.Text('Report Period: $period', style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700)),
+                      ],
+                    ),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Text('Date Generated: ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}', style: const pw.TextStyle(fontSize: 10)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey400),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1.5),
+                  1: const pw.FlexColumnWidth(2),
+                  2: const pw.FlexColumnWidth(2),
+                  3: const pw.FlexColumnWidth(1.5),
+                  4: const pw.FlexColumnWidth(1.5),
+                  5: const pw.FlexColumnWidth(1.5),
+                  6: const pw.FlexColumnWidth(1.5),
+                },
+                children: tableRows,
+              ),
+              pw.SizedBox(height: 20),
+              pw.Divider(),
+              pw.SizedBox(height: 10),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.end,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text('Total Orders Completed: ${periodSales.length}', style: const pw.TextStyle(fontSize: 12)),
+                      pw.SizedBox(height: 4),
+                      pw.Text('Gross Sales (Subtotal): ${fmtPdf(grossSales)}', style: const pw.TextStyle(fontSize: 12)),
+                      pw.SizedBox(height: 4),
+                      pw.Text('Total Discounts Given: ${fmtPdf(totalDiscounts)}', style: const pw.TextStyle(fontSize: 12, color: PdfColors.red700)),
+                      pw.SizedBox(height: 8),
+                      pw.Text('NET REVENUE: ${fmtPdf(netRevenue)}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16, color: PdfColors.green800)),
+                    ],
+                  ),
+                ],
+              ),
+            ];
+          },
+        ),
+      );
+
+      final bytes = await doc.save();
+      if (context.mounted) Navigator.pop(context); // close loading dialog
+
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'Sales_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+      );
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generating PDF: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -364,7 +1092,10 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           const SizedBox(height: 12),
           Text(
             'No orders found',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey.shade500),
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade500,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -411,7 +1142,9 @@ String _formatDate(DateTime date) {
     'July', 'August', 'September', 'October', 'November', 'December',
   ];
   final month = months[date.month - 1];
-  final hour = date.hour > 12 ? date.hour - 12 : (date.hour == 0 ? 12 : date.hour);
+  final hour = date.hour > 12
+      ? date.hour - 12
+      : (date.hour == 0 ? 12 : date.hour);
   final minute = date.minute.toString().padLeft(2, '0');
   final period = date.hour >= 12 ? 'PM' : 'AM';
   return '$month ${date.day}, ${date.year} • $hour:$minute $period';
@@ -424,11 +1157,11 @@ class _OrderGroup {
   final String status;
   final DateTime createdAt;
   final double totalAmount;
-  final double subtotal; 
-  final double discount; 
-  final double cashGiven;      
-  final double changeAmount;   
-  final String paymentMode;    
+  final double subtotal;
+  final double discount;
+  final double cashGiven;
+  final double changeAmount;
+  final String paymentMode;
   final List<_OrderLineItem> items;
   final String? createdBy;
   final String? preparedBy;
@@ -438,11 +1171,11 @@ class _OrderGroup {
     required this.status,
     required this.createdAt,
     required this.totalAmount,
-    required this.subtotal, 
-    required this.discount, 
-    required this.cashGiven,     
-    required this.changeAmount,  
-    required this.paymentMode,   
+    required this.subtotal,
+    required this.discount,
+    required this.cashGiven,
+    required this.changeAmount,
+    required this.paymentMode,
     required this.items,
     this.createdBy,
     this.preparedBy,
@@ -456,7 +1189,7 @@ class _OrderLineItem {
   final String productId;
   final String productName;
   final int quantity;
-  final double price; 
+  final double price;
 
   _OrderLineItem({
     required this.productId,
@@ -466,11 +1199,11 @@ class _OrderLineItem {
   });
 
   factory _OrderLineItem.fromJson(Map<String, dynamic> json) => _OrderLineItem(
-        productId: json['product_id']?.toString() ?? '',
-        productName: json['product_name']?.toString() ?? 'Unknown Item',
-        quantity: (json['quantity'] as num?)?.toInt() ?? 0,
-        price: (json['price'] as num?)?.toDouble() ?? 0.0,
-      );
+    productId: json['product_id']?.toString() ?? '',
+    productName: json['product_name']?.toString() ?? 'Unknown Item',
+    quantity: (json['quantity'] as num?)?.toInt() ?? 0,
+    price: (json['price'] as num?)?.toDouble() ?? 0.0,
+  );
 }
 
 // ─── Order Card ───────────────────────────────────────────────────────────────
@@ -484,7 +1217,8 @@ class _OrderCard extends StatefulWidget {
   State<_OrderCard> createState() => _OrderCardState();
 }
 
-class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMixin {
+class _OrderCardState extends State<_OrderCard>
+    with SingleTickerProviderStateMixin {
   bool _expanded = false;
 
   void _toggle() {
@@ -496,7 +1230,9 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           backgroundColor: Colors.white,
           child: SizedBox(
             width: 400,
@@ -506,49 +1242,89 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Receipt Header
                     const Text(
                       'INVENTORY PLUS',
-                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.5),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                        letterSpacing: 1.5,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'SPRJ Paint Center - San Pedro, Laguna',
-                      style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 11,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     const _DashedDivider(),
                     const SizedBox(height: 16),
-                    
-                    // Meta info
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Order #', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
-                        Text(g.shortId, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                        Text(
+                          'Order #',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 11,
+                          ),
+                        ),
+                        Text(
+                          g.shortId,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Date', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
-                        Text(_formatDate(g.createdAt), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                        Text(
+                          'Date',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 11,
+                          ),
+                        ),
+                        Text(
+                          _formatDate(g.createdAt),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Cashier', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
-                        Text(g.createdBy ?? "Admin", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                        Text(
+                          'Cashier',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 11,
+                          ),
+                        ),
+                        Text(
+                          g.createdBy ?? "Admin",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 16),
                     const _DashedDivider(),
                     const SizedBox(height: 16),
-                    
-                    // Items List
+
                     ...g.items.map((item) {
                       double itemTotal = item.price * item.quantity;
                       return Padding(
@@ -561,27 +1337,50 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(item.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                  Text('${item.quantity} qty x ₱${item.price.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                  Text(
+                                    item.productName,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${item.quantity} qty x ₱${item.price.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
                                 ],
-                              )
+                              ),
                             ),
-                            Text('₱${itemTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            Text(
+                              '₱${itemTotal.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
                           ],
                         ),
                       );
                     }),
-                    
+
                     const SizedBox(height: 16),
                     const _DashedDivider(),
                     const SizedBox(height: 16),
-                    
-                    // Totals
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('Subtotal', style: TextStyle(fontSize: 12)),
-                        Text('₱${g.subtotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        Text(
+                          '₱${g.subtotal.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
                       ],
                     ),
                     if (g.discount > 0) ...[
@@ -589,8 +1388,17 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Discount', style: TextStyle(fontSize: 12)),
-                          Text('-₱${g.discount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          const Text(
+                            'Discount',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          Text(
+                            '-₱${g.discount.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -598,8 +1406,20 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('TOTAL', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
-                        Text('₱${g.totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+                        const Text(
+                          'TOTAL',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                          ),
+                        ),
+                        Text(
+                          '₱${g.totalAmount.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                          ),
+                        ),
                       ],
                     ),
 
@@ -611,8 +1431,17 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Cash Given', style: TextStyle(fontSize: 12)),
-                            Text('₱${g.cashGiven.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            const Text(
+                              'Cash Given',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            Text(
+                              '₱${g.cashGiven.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -621,8 +1450,17 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Change', style: TextStyle(fontSize: 12)),
-                            Text('₱${g.changeAmount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            const Text(
+                              'Change',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            Text(
+                              '₱${g.changeAmount.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -630,15 +1468,38 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Mode of Payment', style: TextStyle(fontSize: 12)),
-                          Text(g.paymentMode, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          const Text(
+                            'Mode of Payment',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          Text(
+                            g.paymentMode,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
                         ],
                       ),
                     ],
 
                     const SizedBox(height: 24),
-                    Text('Thank you for your purchase!', style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontStyle: FontStyle.italic)),
-                    Text('This serves as your official receipt.', style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontStyle: FontStyle.italic)),
+                    Text(
+                      'Thank you for your purchase!',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                    Text(
+                      'This serves as your official receipt.',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
 
                     const SizedBox(height: 24),
                     SizedBox(
@@ -649,18 +1510,23 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                           foregroundColor: Colors.black87,
                           side: BorderSide(color: Colors.grey.shade300),
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
-                        child: const Text("Close", style: TextStyle(fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          "Close",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
-                    )
+                    ),
                   ],
                 ),
               ),
             ),
           ),
         );
-      }
+      },
     );
   }
 
@@ -689,15 +1555,17 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: 6,
-              color: color,
-            ),
+            Container(width: 6, color: color),
             Expanded(
               child: Theme(
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                data: Theme.of(
+                  context,
+                ).copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  tilePadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   onExpansionChanged: (expanded) => _toggle(),
                   leading: Container(
                     padding: const EdgeInsets.all(10),
@@ -711,7 +1579,11 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                     children: [
                       Text(
                         'Order #${g.shortId}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A)),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Color(0xFF0F172A),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       _StatusChip(status: g.status),
@@ -721,7 +1593,10 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                     padding: const EdgeInsets.only(top: 4.0),
                     child: Text(
                       '${_formatDate(g.createdAt)} - by ${g.createdBy ?? "Admin"}',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                      ),
                     ),
                   ),
                   trailing: Column(
@@ -730,16 +1605,27 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                     children: [
                       Text(
                         "₱${g.totalAmount.toStringAsFixed(2)}",
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A)),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Color(0xFF0F172A),
+                        ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         '${g.items.length} item${g.items.length == 1 ? '' : 's'}',
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade500,
+                        ),
                       ),
                     ],
                   ),
-                  childrenPadding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                  childrenPadding: const EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    bottom: 16,
+                  ),
                   children: [
                     Divider(height: 1, color: Colors.grey.shade100),
                     const SizedBox(height: 12),
@@ -747,7 +1633,12 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                       alignment: Alignment.centerLeft,
                       child: Text(
                         "ORDER ITEMS",
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.0),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey,
+                          letterSpacing: 1.0,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -762,7 +1653,11 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                                 color: Colors.orange.shade50,
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: const Icon(LucideIcons.package, size: 16, color: Colors.orange),
+                              child: const Icon(
+                                LucideIcons.package,
+                                size: 16,
+                                color: Colors.orange,
+                              ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -771,44 +1666,63 @@ class _OrderCardState extends State<_OrderCard> with SingleTickerProviderStateMi
                                 children: [
                                   Text(
                                     item.productName,
-                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF0F172A),
+                                    ),
                                   ),
                                   if (item.price > 0)
                                     Text(
                                       "₱${item.price.toStringAsFixed(2)} / unit",
-                                      style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey.shade500,
+                                      ),
                                     ),
                                 ],
                               ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF0F172A),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 "x${item.quantity}",
-                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
-                            )
+                            ),
                           ],
                         ),
                       ),
                     ),
-                    
+
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
                         onPressed: () => _showReceiptModal(context, g),
                         icon: const Icon(LucideIcons.receipt, size: 16),
-                        label: const Text("Show Receipt", style: TextStyle(fontWeight: FontWeight.bold)),
+                        label: const Text(
+                          "Show Receipt",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.black87,
                           side: BorderSide(color: Colors.grey.shade300),
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
                       ),
                     ),
@@ -840,7 +1754,10 @@ class _StatusChip extends StatelessWidget {
       child: Text(
         status._cap(),
         style: TextStyle(
-            fontSize: 11, fontWeight: FontWeight.bold, color: color),
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
       ),
     );
   }

@@ -418,12 +418,14 @@ class _PosCartPageState extends State<PosCartPage>
                       style: const TextStyle(fontWeight: FontWeight.bold),
                       onSubmitted: (_) => applyDiscount(),
                       decoration: InputDecoration(
-                        prefixText: isPercent ? "" : "₱ ",
+                        prefixText: isPercent ? "%" : "₱ ",
                         prefixStyle: const TextStyle(
                           color: Colors.orange,
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),
+                      hintText: isPercent ? "Enter % Discount" : "Enter Amount",
+                      hintStyle: TextStyle(color: Colors.grey.shade400),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(color: Colors.grey.shade300),
