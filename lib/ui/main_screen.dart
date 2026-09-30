@@ -27,7 +27,8 @@ class _MainScreenState extends State<MainScreen> {
   int? _currentIndex;
   bool _isDetailView = false;
   InventoryItem? _selectedItem;
-String _txTargetTab = 'Sales History';
+  String _txTargetTab = 'Sales History';
+  String? _targetOrderId;
   // --- DESKTOP COLOR PALETTE ---
   static const Color _primaryOrange = Color(0xFFEA580C);
   static const Color _darkSidebarBg = Color(0xFF0F172A);
@@ -166,8 +167,16 @@ String _txTargetTab = 'Sales History';
         if (isCashier || isAdmin) {
           pages.add(PosCartPage(controller: widget.controller));
         }
-        if (isHelper || isAdmin) {
-          pages.add(OrderQueuePage(controller: widget.controller));
+       if (isHelper || isAdmin) {
+          pages.add(
+            OrderQueuePage(
+              controller: widget.controller,
+              targetOrderId: _targetOrderId,
+              onOrderOpened: () {
+                if (mounted) setState(() => _targetOrderId = null);
+              },
+            ),
+          );
         }
         
         pages.add(
@@ -178,8 +187,19 @@ String _txTargetTab = 'Sales History';
         );
 
         if (isAdmin) {
-          pages.add(TransactionHistoryPage(controller: widget.controller,initialTab: _txTargetTab,));
-        }  
+          pages.add(
+            TransactionHistoryPage(
+              controller: widget.controller,
+              initialTab: _txTargetTab,
+              onCompleteOrder: (orderId) {
+                setState(() {
+                  _targetOrderId = orderId;
+                  _currentIndex = orderQueueIndex;
+                });
+              },
+            ),
+          );
+        } 
 
         if (isAdmin) {
           pages.add(SystemSettingsPage(controller: widget.controller));

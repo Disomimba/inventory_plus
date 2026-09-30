@@ -242,8 +242,9 @@ class _PosCartPageState extends State<PosCartPage>
 
     if (paymentData == null || paymentData['confirmed'] != true) return;
   
+    ({DateTime createdAt, DateTime completedAt})? times;
     try {
-      await widget.controller.completeOrder(
+      times = await widget.controller.completeOrder(
         order,
         paymentMode: paymentData['paymentMode'],
         cashGiven: paymentData['cashReceived'],
@@ -253,6 +254,7 @@ class _PosCartPageState extends State<PosCartPage>
       if (mounted) AppToast.error(context, "Couldn't complete the order: $e");
       return;
     }
+    if (times == null) return; // already completed elsewhere
 
     onCompleted?.call();
 
@@ -262,6 +264,8 @@ class _PosCartPageState extends State<PosCartPage>
         paymentMode: paymentData['paymentMode'],
         cashReceived: paymentData['cashReceived'],
         change: paymentData['change'],
+        orderedAt: times.createdAt,
+        completedAt: times.completedAt,
       );
     }
   }
@@ -1056,11 +1060,34 @@ class _PosCartPageState extends State<PosCartPage>
     );
   }
 
+   String _fmtReceiptDate(DateTime d) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    final hr = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
+    final min = d.minute.toString().padLeft(2, '0');
+    return '${months[d.month - 1]} ${d.day}, ${d.year} $hr:$min $ampm';
+  }
+
   void _showReceiptDialog(
     CustomerOrder o, {
     String? paymentMode,
     double? cashReceived,
     double? change,
+    DateTime? orderedAt,
+    DateTime? completedAt,
   }) {
     double subtotal = 0;
     List<Widget> itemRows = [];
@@ -1121,27 +1148,15 @@ class _PosCartPageState extends State<PosCartPage>
       );
     }
 
-    DateTime now = DateTime.now();
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    String ampm = now.hour >= 12 ? 'PM' : 'AM';
-    int hr = now.hour > 12 ? now.hour - 12 : (now.hour == 0 ? 12 : now.hour);
-    String min = now.minute.toString().padLeft(2, '0');
-    String dateStr =
-        '${months[now.month - 1]} ${now.day}, ${now.year} $hr:$min $ampm';
     String cashierName = widget.controller.currentUserName ?? "Admin";
+
+    final DateTime completedTime = completedAt ?? DateTime.now();
+    final String completedStr = _fmtReceiptDate(completedTime);
+    final String? orderedStr =
+        (orderedAt != null &&
+            orderedAt.difference(completedTime).inMinutes.abs() >= 1)
+        ? _fmtReceiptDate(orderedAt)
+        : null;
 
     showDialog(
       context: context,
@@ -1244,19 +1259,41 @@ class _PosCartPageState extends State<PosCartPage>
                             ),
                           ],
                         ),
+                                                if (orderedStr != null) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Ordered',
+                                style: TextStyle(
+                                  color: Colors.grey.shade600,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              Text(
+                                orderedStr,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                         const SizedBox(height: 4),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              'Date',
+                              'Completed',
                               style: TextStyle(
                                 color: Colors.grey.shade600,
                                 fontSize: 11,
                               ),
                             ),
                             Text(
-                              dateStr,
+                              completedStr,
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 11,

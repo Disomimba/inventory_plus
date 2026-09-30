@@ -1,13 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:inventory_plus/ui/widgets/app_toast.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../logic/inventory_controller.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'reports/sales_report_generator.dart'; 
+
+String _fmtQty(double v) =>
+    v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
+
 class TransactionHistoryPage extends StatefulWidget {
   final InventoryController controller;
-final String initialTab;
-  const TransactionHistoryPage({super.key, required this.controller,this.initialTab = 'Sales History',});
+  final String initialTab;
+
+  /// Called when the user taps "Complete Order Now" on a pending order.
+  /// The parent screen should switch to the   Order Queue and open that order.
+  final void Function(String orderId)? onCompleteOrder;
+
+  const TransactionHistoryPage({
+    super.key,
+    required this.controller,
+    this.initialTab = 'Sales History',
+    this.onCompleteOrder,
+  });
 
   @override
   State<TransactionHistoryPage> createState() => _TransactionHistoryPageState();
@@ -164,10 +180,17 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             preparedBy: order['prepared_by'] != null
                 ? profileNames[int.tryParse(order['prepared_by'].toString())]
                 : null,
+            preparedAt: order['prepared_at'] != null
+                ? DateTime.parse(order['prepared_at'].toString()).toLocal()
+                : null,
+            completedAt: order['completed_at'] != null
+                ? DateTime.parse(order['completed_at'].toString()).toLocal()
+                : null,
           ),
         );
       }
 
+      groups.sort((a, b) => b.eventAt.compareTo(a.eventAt));
       return groups;
     } catch (e) {
       debugPrint('Error fetching orders: $e');
@@ -219,8 +242,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                           final count = snapshot.data
                                   ?.where(
                                     (g) =>
-                                        g.createdAt.month == DateTime.now().month &&
-                                        g.createdAt.year == DateTime.now().year,
+                                        g.eventAt.month == DateTime.now().month &&
+                                        g.eventAt.year == DateTime.now().year,
                                   )
                                   .length ?? 0;
                           return Text(
@@ -292,8 +315,16 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
 
                 // Sales Stats
                 final now = DateTime.now();
-                final thisMonth = all.where((g) => g.createdAt.month == now.month && g.createdAt.year == now.year).toList();
-                final totalOrders = thisMonth.length;
+                final thisMonth = all
+                    .where(
+                      (g) =>
+                          g.eventAt.month == now.month &&
+                          g.eventAt.year == now.year,
+                    )
+                    .toList();
+                final totalOrders = thisMonth
+                    .where((g) => g.status != 'cancelled')
+                    .length;
                 final pendingOrders = thisMonth.where((g) => g.status == 'pending' || g.status == 'prepared').length;
                 final revenue = thisMonth.where((g) => g.status == 'completed').fold(0.0, (sum, g) => sum + g.totalAmount);
 
@@ -489,7 +520,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   }
 
   Widget _buildFilterPills() {
-    final filters = ['All', 'Pending', 'Prepared', 'Completed'];
+    final filters = ['All', 'Pending', 'Prepared', 'Completed', 'Cancelled'];
     return Row(
       children: filters.map((f) {
         final isSelected = _filterStatus == f;
@@ -567,7 +598,7 @@ Widget _buildSalesHistoryList(List<_OrderGroup> filteredOrders) {
     // Group the orders by Date
     Map<String, List<_OrderGroup>> groupedOrders = {};
     for (var order in filteredOrders) {
-      final dateKey = _formatLogDateGroup(order.createdAt);
+      final dateKey = _formatLogDateGroup(order.eventAt);
       if (!groupedOrders.containsKey(dateKey)) {
         groupedOrders[dateKey] = [];
       }
@@ -597,7 +628,12 @@ Widget _buildSalesHistoryList(List<_OrderGroup> filteredOrders) {
               ),
             ),
             // Build the cards for this specific date group
-            ...orders.map((order) => _OrderCard(group: order)),
+                        ...orders.map(
+              (order) => _OrderCard(
+                group: order,
+                onCompleteOrder: widget.onCompleteOrder,
+              ),
+            ),
           ],
         );
       },
@@ -916,7 +952,8 @@ void _showSalesReportDialog(BuildContext context) {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => const Center(child: CircularProgressIndicator(color: Colors.orange)),
+      builder: (dialogContext) =>
+          const Center(child: CircularProgressIndicator(color: Colors.orange)),
     );
 
     try {
@@ -932,157 +969,58 @@ void _showSalesReportDialog(BuildContext context) {
 
       // Grab exactly the orders shown in the UI
       final allGroups = await _groupedFuture;
-      
+
       // Filter for COMPLETED sales within the timeframe
       final periodSales = allGroups.where((g) {
-        return g.status == 'completed' && g.createdAt.isAfter(cutoffDate);
+        return g.status == 'completed' && g.eventAt.isAfter(cutoffDate);
       }).toList();
 
       if (periodSales.isEmpty) {
         if (context.mounted) {
           Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No completed sales found for this period.'), backgroundColor: Colors.orange),
-          );
+          AppToast.error(context, 'No completed sales found for this period.');
         }
         return;
       }
 
-      double grossSales = 0.0;
-      double totalDiscounts = 0.0;
-      double netRevenue = 0.0;
+      final entries = periodSales
+          .map(
+            (sale) => SalesReportEntry(
+              orderNumber: sale.shortId,
+              date: sale.eventAt,
+              cashier: sale.createdBy ?? 'Admin',
+              paymentMode: sale.paymentMode,
+              subtotal: sale.subtotal,
+              discount: sale.discount,
+              total: sale.totalAmount,
+            ),
+          )
+          .toList();
 
-      final tableRows = <pw.TableRow>[];
-      tableRows.add(
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(color: PdfColors.grey300),
-          children: [
-            'Order #', 'Date', 'Cashier', 'Payment', 'Subtotal', 'Discount', 'Total'
-          ].map((text) => pw.Padding(
-            padding: const pw.EdgeInsets.all(6),
-            child: pw.Text(text, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
-          )).toList(),
-        ),
+      final bytes = await SalesReportGenerator.generate(
+        period: period,
+        periodStart: cutoffDate,
+        periodEnd: now,
+        generatedAt: now,
+        generatedBy: widget.controller.currentUserName ?? 'Admin',
+        sales: entries,
       );
 
-      String fmtPdf(double val) {
-        RegExp reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
-        String mathFunc(Match match) => '${match[1]},';
-        return 'P${val.toStringAsFixed(2).replaceAllMapped(reg, mathFunc)}';
-      }
-
-      for (var sale in periodSales) {
-        grossSales += sale.subtotal;
-        totalDiscounts += sale.discount;
-        netRevenue += sale.totalAmount;
-
-        final timeStr = "${sale.createdAt.hour > 12 ? sale.createdAt.hour - 12 : (sale.createdAt.hour == 0 ? 12 : sale.createdAt.hour)}:${sale.createdAt.minute.toString().padLeft(2, '0')} ${sale.createdAt.hour >= 12 ? 'PM' : 'AM'}";
-        final dateStr = "${sale.createdAt.month}/${sale.createdAt.day}/${sale.createdAt.year} $timeStr";
-
-        tableRows.add(
-          pw.TableRow(
-            children: [
-              sale.shortId,
-              dateStr,
-              sale.createdBy ?? "Admin",
-              sale.paymentMode,
-              fmtPdf(sale.subtotal),
-              sale.discount > 0 ? fmtPdf(sale.discount) : '-',
-              fmtPdf(sale.totalAmount),
-            ].map((text) => pw.Padding(
-              padding: const pw.EdgeInsets.all(6),
-              child: pw.Text(text, style: const pw.TextStyle(fontSize: 10)),
-            )).toList(),
-          ),
-        );
-      }
-
-      final doc = pw.Document();
-      doc.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(32),
-          build: (pw.Context context) {
-            return [
-              pw.Header(
-                level: 0,
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text('SPRJ Paint Center', style: pw.TextStyle(fontSize: 12, color: PdfColors.grey700, fontWeight: pw.FontWeight.bold)),
-                        pw.SizedBox(height: 4),
-                        pw.Text('Sales Summary Report', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
-                        pw.SizedBox(height: 4),
-                        pw.Text('Report Period: $period', style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700)),
-                      ],
-                    ),
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Text('Date Generated: ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}', style: const pw.TextStyle(fontSize: 10)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey400),
-                columnWidths: {
-                  0: const pw.FlexColumnWidth(1.5),
-                  1: const pw.FlexColumnWidth(2),
-                  2: const pw.FlexColumnWidth(2),
-                  3: const pw.FlexColumnWidth(1.5),
-                  4: const pw.FlexColumnWidth(1.5),
-                  5: const pw.FlexColumnWidth(1.5),
-                  6: const pw.FlexColumnWidth(1.5),
-                },
-                children: tableRows,
-              ),
-              pw.SizedBox(height: 20),
-              pw.Divider(),
-              pw.SizedBox(height: 10),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.end,
-                children: [
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      pw.Text('Total Orders Completed: ${periodSales.length}', style: const pw.TextStyle(fontSize: 12)),
-                      pw.SizedBox(height: 4),
-                      pw.Text('Gross Sales (Subtotal): ${fmtPdf(grossSales)}', style: const pw.TextStyle(fontSize: 12)),
-                      pw.SizedBox(height: 4),
-                      pw.Text('Total Discounts Given: ${fmtPdf(totalDiscounts)}', style: const pw.TextStyle(fontSize: 12, color: PdfColors.red700)),
-                      pw.SizedBox(height: 8),
-                      pw.Text('NET REVENUE: ${fmtPdf(netRevenue)}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16, color: PdfColors.green800)),
-                    ],
-                  ),
-                ],
-              ),
-            ];
-          },
-        ),
-      );
-
-      final bytes = await doc.save();
       if (context.mounted) Navigator.pop(context); // close loading dialog
 
       await Printing.sharePdf(
         bytes: bytes,
-        filename: 'Sales_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+        filename:
+            'Sales_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
       );
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error generating PDF: $e'), backgroundColor: Colors.red),
-        );
+        AppToast.error(context, 'Error generating PDF: $e');
       }
     }
   }
+
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -1118,6 +1056,10 @@ Color _statusColor(String status) {
       return Colors.blue;
     case 'pending':
       return Colors.orange;
+    case 'cancelled':
+      return Colors.red.shade400;
+    case 'solo_picking':
+      return Colors.orange;
     default:
       return Colors.grey;
   }
@@ -1130,6 +1072,10 @@ IconData _statusIcon(String status) {
     case 'prepared':
       return LucideIcons.packageCheck;
     case 'pending':
+      return LucideIcons.clock;
+    case 'cancelled':
+      return LucideIcons.x;
+    case 'solo_picking':
       return LucideIcons.clock;
     default:
       return LucideIcons.circle;
@@ -1165,6 +1111,8 @@ class _OrderGroup {
   final List<_OrderLineItem> items;
   final String? createdBy;
   final String? preparedBy;
+  final DateTime? preparedAt;
+  final DateTime? completedAt;
 
   _OrderGroup({
     required this.id,
@@ -1179,16 +1127,20 @@ class _OrderGroup {
     required this.items,
     this.createdBy,
     this.preparedBy,
+    this.preparedAt,
+    this.completedAt,
   });
 
   String get shortId =>
       id.length >= 8 ? id.substring(0, 8).toUpperCase() : id.toUpperCase();
+
+  DateTime get eventAt => completedAt ?? preparedAt ?? createdAt;
 }
 
 class _OrderLineItem {
   final String productId;
   final String productName;
-  final int quantity;
+  final double quantity;
   final double price;
 
   _OrderLineItem({
@@ -1201,7 +1153,7 @@ class _OrderLineItem {
   factory _OrderLineItem.fromJson(Map<String, dynamic> json) => _OrderLineItem(
     productId: json['product_id']?.toString() ?? '',
     productName: json['product_name']?.toString() ?? 'Unknown Item',
-    quantity: (json['quantity'] as num?)?.toInt() ?? 0,
+    quantity: (json['quantity'] as num?)?.toDouble() ?? 0,
     price: (json['price'] as num?)?.toDouble() ?? 0.0,
   );
 }
@@ -1210,8 +1162,9 @@ class _OrderLineItem {
 
 class _OrderCard extends StatefulWidget {
   final _OrderGroup group;
+  final void Function(String orderId)? onCompleteOrder;
 
-  const _OrderCard({required this.group});
+  const _OrderCard({required this.group, this.onCompleteOrder});
 
   @override
   State<_OrderCard> createState() => _OrderCardState();
@@ -1225,7 +1178,8 @@ class _OrderCardState extends State<_OrderCard>
     setState(() => _expanded = !_expanded);
   }
 
-  void _showReceiptModal(BuildContext context, _OrderGroup g) {
+    void _showReceiptModal(BuildContext context, _OrderGroup g) {
+    if (g.status != 'completed') return;
     showDialog(
       context: context,
       builder: (context) {
@@ -1282,11 +1236,11 @@ class _OrderCardState extends State<_OrderCard>
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Row(
+                                        Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Date',
+                          'Ordered',
                           style: TextStyle(
                             color: Colors.grey.shade600,
                             fontSize: 11,
@@ -1301,6 +1255,28 @@ class _OrderCardState extends State<_OrderCard>
                         ),
                       ],
                     ),
+                    if (g.completedAt != null) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Completed',
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 11,
+                            ),
+                          ),
+                          Text(
+                            _formatDate(g.completedAt!),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 4),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1345,7 +1321,7 @@ class _OrderCardState extends State<_OrderCard>
                                     ),
                                   ),
                                   Text(
-                                    '${item.quantity} qty x ₱${item.price.toStringAsFixed(2)}',
+                                    '${_fmtQty(item.quantity)} qty x ₱${item.price.toStringAsFixed(2)}',
                                     style: const TextStyle(
                                       fontSize: 11,
                                       color: Colors.grey,
@@ -1592,7 +1568,11 @@ class _OrderCardState extends State<_OrderCard>
                   subtitle: Padding(
                     padding: const EdgeInsets.only(top: 4.0),
                     child: Text(
-                      '${_formatDate(g.createdAt)} - by ${g.createdBy ?? "Admin"}',
+                      g.completedAt != null
+                          ? 'Completed ${_formatDate(g.completedAt!)} - by ${g.createdBy ?? "Admin"}'
+                          : g.preparedAt != null
+                          ? 'Prepared ${_formatDate(g.preparedAt!)} - by ${g.createdBy ?? "Admin"}'
+                          : '${_formatDate(g.createdAt)} - by ${g.createdBy ?? "Admin"}',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey.shade500,
@@ -1627,6 +1607,14 @@ class _OrderCardState extends State<_OrderCard>
                     bottom: 16,
                   ),
                   children: [
+                    Divider(height: 1, color: Colors.grey.shade100),
+                    const SizedBox(height: 12),
+                    _buildTimelineRow('Ordered', g.createdAt),
+                    if (g.preparedAt != null)
+                      _buildTimelineRow('Prepared', g.preparedAt!),
+                    if (g.completedAt != null)
+                      _buildTimelineRow('Completed', g.completedAt!),
+                    const SizedBox(height: 12),
                     Divider(height: 1, color: Colors.grey.shade100),
                     const SizedBox(height: 12),
                     const Align(
@@ -1693,7 +1681,7 @@ class _OrderCardState extends State<_OrderCard>
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                "x${item.quantity}",
+                                "x${_fmtQty(item.quantity)}",
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 12,
@@ -1707,25 +1695,76 @@ class _OrderCardState extends State<_OrderCard>
                     ),
 
                     const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _showReceiptModal(context, g),
-                        icon: const Icon(LucideIcons.receipt, size: 16),
-                        label: const Text(
-                          "Show Receipt",
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                    if (g.status == 'completed')
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _showReceiptModal(context, g),
+                          icon: const Icon(LucideIcons.receipt, size: 16),
+                          label: const Text(
+                            "Show Receipt",
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.black87,
+                            side: BorderSide(color: Colors.grey.shade300),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
                         ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.black87,
-                          side: BorderSide(color: Colors.grey.shade300),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                      )
+                    else if (g.status == 'pending')
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: widget.onCompleteOrder == null
+                              ? null
+                              : () => widget.onCompleteOrder!(g.id),
+                          icon: const Icon(
+                            LucideIcons.check,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                          label: const Text(
+                            "Complete Order Now",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Text(
+                          g.status == 'prepared'
+                              ? "Items are picked. Complete the payment from POS → Pending Orders → Complete Transaction."
+                              : g.status == 'cancelled'
+                              ? "This order was cancelled. Its items were returned to stock, so there is no receipt."
+                              : "Order in progress — no receipt yet.",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
                           ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -1752,7 +1791,7 @@ class _StatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        status._cap(),
+        status == 'solo_picking' ? 'Picking' : status._cap(),
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.bold,
@@ -1794,4 +1833,27 @@ class _DashedDivider extends StatelessWidget {
       },
     );
   }
+}
+
+Widget _buildTimelineRow(String label, DateTime date) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2.0),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+        ),
+        Text(
+          _formatDate(date),
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF0F172A),
+          ),
+        ),
+      ],
+    ),
+  );
 }

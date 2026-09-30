@@ -837,11 +837,12 @@ Stream<List<CustomerOrder>> streamOrders() {
         );
   }
 
-  Future<void> updateOrderStatus(String orderId, String newStatus) async {
+ Future<void> updateOrderStatus(String orderId, String newStatus) async {
     try {
       final Map<String, dynamic> updateData = {'status': newStatus};
       if (newStatus == 'prepared') {
         updateData['prepared_by'] = currentUserNumericId;
+        updateData['prepared_at'] = DateTime.now().toUtc().toIso8601String();
       }
       await supabase
           .from('orders')
@@ -854,14 +855,14 @@ Stream<List<CustomerOrder>> streamOrders() {
 
   Set<String>? _processingOrders;
 
-  Future<void> completeOrder(
+    Future<({DateTime createdAt, DateTime completedAt})?> completeOrder(
     CustomerOrder order, {
     String? paymentMode,
     double? cashGiven,
     double? changeAmount,
   }) async {
     _processingOrders ??= {};
-    if (_processingOrders!.contains(order.id)) return;
+    if (_processingOrders!.contains(order.id)) return null;
     _processingOrders!.add(order.id);
 
     try {
@@ -870,23 +871,30 @@ Stream<List<CustomerOrder>> streamOrders() {
           .select('status')
           .eq('id', order.id)
           .single();
-       final s = checkOrder['status'];
-      if (s == 'completed') return;
+      final s = checkOrder['status'];
+      if (s == 'completed') return null;
       if (s == 'cancelled') throw Exception('This order was cancelled.');
 
-      // Prepare the data payload to update
+      final completedAt = DateTime.now().toUtc();
       final Map<String, dynamic> updateData = {
         'status': 'completed',
+        'completed_at': completedAt.toIso8601String(),
       };
-
-      // Add payment data if provided
       if (paymentMode != null) updateData['payment_mode'] = paymentMode;
       if (cashGiven != null) updateData['cash_given'] = cashGiven;
       if (changeAmount != null) updateData['change_amount'] = changeAmount;
 
-      // Update the database
-      await supabase.from('orders').update(updateData).eq('id', order.id);
-      
+      final row = await supabase
+          .from('orders')
+          .update(updateData)
+          .eq('id', order.id)
+          .select('created_at')
+          .single();
+
+      return (
+        createdAt: DateTime.parse(row['created_at'].toString()).toLocal(),
+        completedAt: completedAt.toLocal(),
+      );
     } finally {
       _processingOrders!.remove(order.id);
     }

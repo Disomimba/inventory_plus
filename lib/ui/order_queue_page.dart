@@ -1,18 +1,25 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import '../data/inventory.dart';
+
 import '../logic/inventory_controller.dart';
-import 'scanner_search_page.dart';
+
 import 'widgets/order_checklist_view.dart';
 
 // --- UPDATE THESE IMPORTS TO MATCH YOUR FILE STRUCTURE ---
 import 'widgets/app_toast.dart';
-import 'widgets/app_dialog.dart';
 
 class OrderQueuePage extends StatefulWidget {
   final InventoryController controller;
-  const OrderQueuePage({super.key, required this.controller});
+  final String? targetOrderId; 
+  final VoidCallback? onOrderOpened;
+  
+  const OrderQueuePage({
+    super.key,
+    required this.controller,
+    this.targetOrderId, 
+    this.onOrderOpened, 
+  });
 
   @override
   State<OrderQueuePage> createState() => _OrderQueuePageState();
@@ -22,6 +29,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   Timer? _timer;
   Duration? _timeOffset;
   final Set<String> _expandedOrders = {};
+   String? _pendingAutoOpenId;
 
   // Track the selected order to show the checklist inline
   dynamic _selectedOrder;
@@ -31,9 +39,19 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   @override
   void initState() {
     super.initState();
+    _pendingAutoOpenId = widget.targetOrderId;
     _timer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
+  }
+
+  @override
+  void didUpdateWidget(OrderQueuePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.targetOrderId != null &&
+        widget.targetOrderId != oldWidget.targetOrderId) {
+      _pendingAutoOpenId = widget.targetOrderId;
+    }
   }
 
   @override
@@ -119,6 +137,21 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
           }
           if (snapshot.hasData) {
             _cachedOrders = snapshot.data!;
+          }
+
+          if (_pendingAutoOpenId != null) {
+            final match = _cachedOrders
+                .where((o) => o.id.toString() == _pendingAutoOpenId)
+                .toList();
+            if (match.isNotEmpty) {
+              final orderToOpen = match.first;
+              _pendingAutoOpenId = null;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                _openOrderChecklist(orderToOpen);
+                widget.onOrderOpened?.call();
+              });
+            }
           }
 
           final pendingOrders =
