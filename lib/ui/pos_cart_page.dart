@@ -7,6 +7,9 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
+import 'widgets/app_toast.dart';
+import 'widgets/app_dialog.dart';
+import 'widgets/order_checklist_view.dart';
 
 const double _kSnapFull = 0.75;
 const double _kBaseChromeHeight = 320.0;
@@ -37,6 +40,10 @@ class _PosCartPageState extends State<PosCartPage>
   late Animation<double> _snapAnimation;
   double _dragStart = 0;
   double _fractionAtDragStart = 0;
+
+  double _kBaseChromeHeight = 368.0; // was 320
+
+  bool _soloMode = false;
 
   @override
   void initState() {
@@ -174,35 +181,201 @@ class _PosCartPageState extends State<PosCartPage>
           quantity: entry.value,
         );
       }).toList();
-      double subtotal = _calculateTotal();
+
+      final double subtotal = _calculateTotal();
       double discountAmt = _isDiscountPercentage
           ? (subtotal * (_discountValue / 100))
           : _discountValue;
-      if (discountAmt > subtotal) discountAmt = subtotal; // Cap discount
-      double totalDue = subtotal - discountAmt;
-      await widget.controller.createCustomerOrder(
-        items,
-        totalAmount: totalDue,
-        discountAmount: discountAmt,
-      );
+      if (discountAmt > subtotal) discountAmt = subtotal;
+      final double totalDue = subtotal - discountAmt;
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Order sent to Helper!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        setState(() {
-          _cart.clear();
-          _discountValue = 0.0;
-          _discountReason = '';
-        });
+      // NOTE: createCustomerOrder needs to return the created CustomerOrder
+      // (with its generated id) so Solo Mode can open the checklist for it.
+      final CustomerOrder? createdOrder = await widget.controller
+          .createCustomerOrder(
+            items,
+            totalAmount: totalDue,
+            discountAmount: discountAmt,
+            soloHandled: _soloMode,
+          );
+      if (createdOrder == null) {
+        throw Exception('Order could not be created.');
       }
+
+      if (!mounted) return;
+
+      setState(() {
+        _cart.clear();
+        _discountValue = 0.0;
+        _discountReason = '';
+      });
+
+      if (_soloMode) {
+        await _runSoloCheckout(createdOrder);
+      } else {
+        AppToast.success(context, 'Order sent to Helper!');
+      }
+    } catch (e) {
+      if (mounted) AppToast.error(context, "Couldn't process the order: $e");
     } finally {
       if (mounted) setState(() => _isProcessingCart = false);
     }
   }
+
+  Future<void> _completeOrderFlow(
+    CustomerOrder order, {
+    VoidCallback? onCompleted,
+  }) async {
+    final double orderSubtotal = order.totalAmount + order.discountAmount;
+    double orderQty = 0;
+    for (final item in order.items) {
+      orderQty += item.quantity;
+    }
+
+    final paymentData = await _showPaymentDialog(
+      subtotal: orderSubtotal,
+      discountAmt: order.discountAmount,
+      totalDue: order.totalAmount,
+      itemsCount: order.items.length,
+      totalQty: orderQty,
+    );
+
+    if (paymentData == null || paymentData['confirmed'] != true) return;
+  
+    try {
+      await widget.controller.completeOrder(
+        order,
+        paymentMode: paymentData['paymentMode'],
+        cashGiven: paymentData['cashReceived'],
+        changeAmount: paymentData['change'],
+      );
+    } catch (e) {
+      if (mounted) AppToast.error(context, "Couldn't complete the order: $e");
+      return;
+    }
+
+    onCompleted?.call();
+
+    if (mounted) {
+      _showReceiptDialog(
+        order,
+        paymentMode: paymentData['paymentMode'],
+        cashReceived: paymentData['cashReceived'],
+        change: paymentData['change'],
+      );
+    }
+  }
+
+ Future<void> _runSoloCheckout(CustomerOrder order) async {
+    final result = await showOrderChecklistModal(
+      context: context,
+      order: order,
+      controller: widget.controller,
+      finishLabel: "PROCEED TO PAYMENT",
+      onCancelOrder: () => _cancelOrderAndRestoreCart(order),
+    );
+    if (!mounted) return;
+
+    switch (result) {
+      case ChecklistResult.finished:
+        await widget.controller.updateOrderStatus(order.id, 'prepared');
+        var paid = false;
+        await _completeOrderFlow(order, onCompleted: () => paid = true);
+        if (!paid && mounted) {
+          AppToast.success(
+            context,
+            "Payment not completed — order is waiting in Pending Orders",
+          );
+        }
+        break;
+      case ChecklistResult.dismissed:
+        // Closed mid-picking: hand it to the helper queue instead of orphaning it.
+        await widget.controller.updateOrderStatus(order.id, 'pending');
+        if (mounted)
+          AppToast.success(context, "Order moved to the Helper queue");
+        break;
+      case ChecklistResult.cancelled:
+        break; // cart already restored
+    }
+  }
+
+  Future<bool> _cancelOrderAndRestoreCart(
+    CustomerOrder order, {
+    bool fromQueue = false,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AppDialog(
+        icon: LucideIcons.undo2,
+        color: Colors.red.shade600,
+        title: "Cancel & Edit This Order?",
+        subtitle: "#${order.id.substring(0, 8).toUpperCase()}",
+        child: Text(
+          fromQueue
+              ? "This cancels the order and puts its items back in your cart. "
+                    "If your helper is already picking it, let them know."
+              : "This cancels the order and puts its items back in your cart so "
+                    "you can change quantities before checking out again.",
+          style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.black87,
+              side: BorderSide(color: Colors.grey.shade300),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: const Text("Keep It"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade600,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: const Text(
+              "Cancel Order",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+      if (confirmed != true) return false;
+
+  try {
+    await widget.controller.cancelOrder(order); // now takes the order, restores stock
+    if (!mounted) return true;
+    setState(() {
+        for (final item in order.items) {
+          _cart[item.productId] = (_cart[item.productId] ?? 0) + item.quantity;
+        }
+        if (order.discountAmount > 0 && _discountValue == 0) {
+          _discountValue = order.discountAmount;
+          _isDiscountPercentage = false;
+        }
+      });
+    AppToast.success(context, "Order cancelled — items are back in your cart");
+    return true;
+  } catch (e) {
+    if (mounted) AppToast.error(context, "Couldn't cancel the order: $e");
+    return false;
+  }
+}
+
+
 
   double _calculateTotal() {
     double total = 0;
@@ -1693,61 +1866,63 @@ class _PosCartPageState extends State<PosCartPage>
                                                   ),
                                                   elevation: 0,
                                                 ),
-                                                onPressed: () async {
-                                                  double orderTotal =
-                                                      o.totalAmount;
-                                                  double orderDiscount =
-                                                      o.discountAmount;
-                                                  double orderSubtotal =
-                                                      orderTotal +
-                                                      orderDiscount;
-
-                                                  double orderQty = 0;
-                                                  for (var item in o.items) {
-                                                    orderQty += item.quantity;
-                                                  }
-
-                                                  final paymentData =
-                                                      await _showPaymentDialog(
-                                                        subtotal: orderSubtotal,
-                                                        discountAmt:
-                                                            orderDiscount,
-                                                        totalDue: orderTotal,
-                                                        itemsCount:
-                                                            o.items.length,
-                                                        totalQty: orderQty,
-                                                      );
-
-                                                  if (paymentData != null &&
-                                                    paymentData['confirmed'] ==
-                                                        true) {
-                                                  await widget.controller.completeOrder(
-                                                    o,
-                                                    paymentMode: paymentData['paymentMode'],
-                                                    cashGiven: paymentData['cashReceived'],
-                                                    changeAmount: paymentData['change'],
-                                                  );
-                                                  if (context.mounted) {
-                                                      Navigator.pop(
-                                                        dialogContext,
-                                                      );
-                                                      _showReceiptDialog(
-                                                        o,
-                                                        paymentMode:
-                                                            paymentData['paymentMode'],
-                                                        cashReceived:
-                                                            paymentData['cashReceived'],
-                                                        change:
-                                                            paymentData['change'],
-                                                      );
-                                                    }
-                                                  }
-                                                },
+                                                onPressed: () =>
+                                                    _completeOrderFlow(
+                                                      o,
+                                                      onCompleted: () {
+                                                        if (dialogContext
+                                                            .mounted)
+                                                          Navigator.pop(
+                                                            dialogContext,
+                                                          );
+                                                      },
+                                                    ),
                                               ),
                                             ),
                                           ],
+                                                                                    const SizedBox(height: 10),
+                                          SizedBox(
+                                            width: double.infinity,
+                                            height: 40,
+                                            child: OutlinedButton.icon(
+                                              icon: Icon(
+                                                LucideIcons.undo2,
+                                                size: 16,
+                                                color: Colors.red.shade400,
+                                              ),
+                                              label: Text(
+                                                'Cancel & Edit',
+                                                style: TextStyle(
+                                                  color: Colors.red.shade400,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                              style: OutlinedButton.styleFrom(
+                                                side: BorderSide(
+                                                  color: Colors.red.shade100,
+                                                ),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                              ),
+                                              onPressed: () async {
+                                                final ok =
+                                                    await _cancelOrderAndRestoreCart(
+                                                      o,
+                                                      fromQueue: true,
+                                                    );
+                                                if (ok &&
+                                                    dialogContext.mounted) {
+                                                  Navigator.pop(dialogContext);
+                                                }
+                                              },
+                                            ),
+                                          ),
                                         ],
                                       ),
+
                                     ),
                                   ),
                                 ],
@@ -2809,11 +2984,18 @@ class _PosCartPageState extends State<PosCartPage>
                     ],
                   ),
                   const SizedBox(height: 16),
+                  _HandlingToggle(
+                    packMyself: _soloMode,
+                    enabled: !_isProcessingCart,
+                    onChanged: (v) => setState(() => _soloMode = v),
+                  ),
+                  const SizedBox(height: 12),
+                  
                   SizedBox(
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton.icon(
-                      onPressed: _cart.isEmpty || _isProcessingCart
+                      onPressed: _cart.isEmpty || _isProcessingCart 
                           ? null
                           : _processOrder,
                       icon: _isProcessingCart
@@ -2839,7 +3021,9 @@ class _PosCartPageState extends State<PosCartPage>
                         elevation: 0,
                       ),
                       label: Text(
-                        _isProcessingCart ? 'Processing...' : 'Process Order',
+                        _isProcessingCart
+                            ? 'Processing...'
+                            : (_soloMode ? 'Process & Pack' : 'Send to Helper'),
                         style: const TextStyle(
                           fontSize: 15,
                           color: Colors.white,
@@ -3145,6 +3329,108 @@ class _QuantityStepperState extends State<_QuantityStepper> {
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Icon(Icons.add, size: 16, color: Colors.black),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HandlingToggle extends StatelessWidget {
+  final bool packMyself;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  const _HandlingToggle({
+    required this.packMyself,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  static const _dur = Duration(milliseconds: 220);
+
+  Widget _label(String text, IconData icon, bool selected, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? onTap : null,
+        child: Center(
+          child: TweenAnimationBuilder<Color?>(
+            tween: ColorTween(
+              end: selected ? Colors.orange : Colors.grey.shade600,
+            ),
+            duration: _dur,
+            builder: (context, color, _) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: color),
+                const SizedBox(width: 6),
+                Text(
+                  text,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: 36,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Stack(
+        children: [
+          AnimatedAlign(
+            duration: _dur,
+            curve: Curves.easeOutCubic,
+            alignment: packMyself
+                ? Alignment.centerRight
+                : Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: 0.5,
+              heightFactor: 1.0,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.06),
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              _label(
+                "Helper packs",
+                LucideIcons.users,
+                !packMyself,
+                () => onChanged(false),
+              ),
+              _label(
+                "I'll pack it",
+                LucideIcons.zap,
+                packMyself,
+                () => onChanged(true),
+              ),
+            ],
           ),
         ],
       ),

@@ -1,8 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../data/inventory.dart';
 import '../logic/inventory_controller.dart';
 import 'scanner_search_page.dart';
+import 'widgets/order_checklist_view.dart';
+
+// --- UPDATE THESE IMPORTS TO MATCH YOUR FILE STRUCTURE ---
+import 'widgets/app_toast.dart';
+import 'widgets/app_dialog.dart';
 
 class OrderQueuePage extends StatefulWidget {
   final InventoryController controller;
@@ -17,7 +23,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   Duration? _timeOffset;
   final Set<String> _expandedOrders = {};
 
-  // Track the selected order to show the checklist inline (keeps the sidebar visible!)
+  // Track the selected order to show the checklist inline
   dynamic _selectedOrder;
 
   List<dynamic> _cachedOrders = [];
@@ -66,7 +72,6 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
   }
 
   void _openOrderChecklist(dynamic order) {
-    // Renders the checklist inline so the sidebar doesn't disappear
     setState(() {
       _selectedOrder = order;
     });
@@ -80,7 +85,6 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
 
   @override
   Widget build(BuildContext context) {
-    // IF AN ORDER IS SELECTED, SHOW THE INLINE CHECKLIST
     if (_selectedOrder != null) {
       return OrderChecklistPage(
         order: _selectedOrder,
@@ -89,16 +93,15 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
       );
     }
 
-    // OTHERWISE, SHOW THE LIST
     return Scaffold(
-      backgroundColor: Colors.white, // Plain white background
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        automaticallyImplyLeading: false, // <--- ADD THIS FIX HERE
+        automaticallyImplyLeading: false,
         title: const Text(
           'Helper Dashboard',
           style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.transparent, // Keeps it seamless with white
+        backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black87),
       ),
@@ -114,7 +117,6 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
           }
-
           if (snapshot.hasData) {
             _cachedOrders = snapshot.data!;
           }
@@ -170,7 +172,7 @@ class _OrderQueuePageState extends State<OrderQueuePage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFFBEADB), // Restored original peach color
+        color: const Color(0xFFFBEADB),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.grey.shade300, width: 0.5),
       ),
@@ -336,7 +338,6 @@ class _OrderCard extends StatelessWidget {
   }
 }
 
-// Update 1: Replace the entire _ExpandedItems widget to remove location tracking logic.
 class _ExpandedItems extends StatelessWidget {
   final dynamic order;
   final InventoryController controller;
@@ -349,8 +350,6 @@ class _ExpandedItems extends StatelessWidget {
       children: [
         Divider(height: 1, thickness: 1, color: Colors.grey.shade100),
         ...order.items.map<Widget>((item) {
-          // Removed the entire location mapping block that created 'locationLabel'
-
           return AnimatedOpacity(
             opacity: 1.0,
             duration: const Duration(milliseconds: 200),
@@ -393,7 +392,6 @@ class _ExpandedItems extends StatelessWidget {
                             color: Colors.black87,
                           ),
                         ),
-                        // Removed the SizedBox and Row displaying the location pin
                       ],
                     ),
                   ),
@@ -408,9 +406,9 @@ class _ExpandedItems extends StatelessWidget {
 }
 
 // ============================================================================
-// INLINE CHECKLIST PAGE
+// FULL-SCREEN CHECKLIST (Order Queue / helper flow — unchanged behavior)
 // ============================================================================
-class OrderChecklistPage extends StatefulWidget {
+class OrderChecklistPage extends StatelessWidget {
   final dynamic order;
   final InventoryController controller;
   final VoidCallback onBack;
@@ -422,587 +420,34 @@ class OrderChecklistPage extends StatefulWidget {
     required this.onBack,
   });
 
-  @override
-  State<OrderChecklistPage> createState() => _OrderChecklistPageState();
-}
-
-class _OrderChecklistPageState extends State<OrderChecklistPage> {
-  // Using a Set of indices guarantees we track completion perfectly
-  final Set<int> _checkedIndices = {};
-
-  bool get _allChecked =>
-      _checkedIndices.length == widget.order.items.length &&
-      widget.order.items.isNotEmpty;
-  int get _checkedCount => _checkedIndices.length;
-  int get _totalCount => widget.order.items.length;
-
-  void _markPrepared() async {
-    await widget.controller.updateOrderStatus(widget.order.id, 'prepared');
-    if (mounted) {
-      widget.onBack();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Order marked as Prepared!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+  Future<void> _markPrepared(BuildContext context) async {
+    await controller.updateOrderStatus(order.id, 'prepared');
+    if (context.mounted) {
+      onBack();
+      AppToast.success(context, 'Order marked as Prepared!');
     }
-  }
-
-  void _showPickConfirmationSheet(
-    InventoryItem dbItem,
-    double targetQuantity,
-    int listIndex,
-  ) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => PickConfirmationSheet(
-        item: dbItem,
-        targetQuantity: targetQuantity,
-        onConfirm: () async {
-          if (mounted) {
-            setState(() {
-              _checkedIndices.add(listIndex);
-            });
-            Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('${dbItem.name} checked off!'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        },
-      ),
-    );
-  }
-
-  void _openScannerToCheckoff(int index, String expectedProductId) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ScannerSearchPage(
-          controller: widget.controller,
-          onSelectItem: (scannedItem) {
-            Navigator.pop(context); // Close scanner
-            if (scannedItem.id == expectedProductId) {
-              _showPickConfirmationSheet(
-                scannedItem,
-                widget.order.items[index].quantity,
-                index,
-              );
-            } else {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${scannedItem.name} is not the right item!'),
-                  backgroundColor: Colors.red,
-                ),
-              );
-            }
-          },
-        ),
-      ),
-    );
-  }
-
-  void _showTutorialModal() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.help_outline, color: Colors.orange),
-            SizedBox(width: 10),
-            // FIX: Wrap Text in Expanded to prevent right overflow
-            Expanded(
-              child: Text("How to Prepare an Order"),
-            ),
-          ],
-        ),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("1. Tap any item in the list to open the QR scanner."),
-            SizedBox(height: 8),
-            Text("2. Scan the QR code on the Shelf."),
-            SizedBox(height: 8),
-            Text("3. Confirm the pick to check it off the list."),
-            SizedBox(height: 16),
-            Text(
-              "Once all items are checked, the 'Notify Cashier' button will be enabled.",
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              "Got it!",
-              style: TextStyle(
-                color: Colors.orange,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final String shortId = widget.order.id
-        .toString()
-        .substring(0, 8)
-        .toUpperCase();
-    final double progress = _totalCount == 0 ? 0 : _checkedCount / _totalCount;
-
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: widget.onBack,
+          icon: const Icon(LucideIcons.arrowLeft, color: Colors.black87),
+          onPressed: onBack,
         ),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "ORDER ASSIGNMENT",
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          "ID: #ORD-$shortId",
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        InkWell(
-                          onTap: _showTutorialModal,
-                          child: const CircleAvatar(
-                            radius: 14,
-                            backgroundColor: Color(0xFF3E322C),
-                            child: Icon(
-                              Icons.question_mark,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _allChecked
-                                ? Colors.green.shade100
-                                : const Color(0xFFFBEADB),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            "$_checkedCount/$_totalCount",
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: _allChecked
-                                  ? Colors.green.shade900
-                                  : const Color(0xFF9E651D),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0, end: progress),
-                  duration: const Duration(milliseconds: 400),
-                  curve: Curves.easeInOut,
-                  builder: (context, value, _) => LinearProgressIndicator(
-                    value: value,
-                    backgroundColor: const Color(0xFFFBEADB),
-                    color: _allChecked ? Colors.green : const Color(0xFFF58220),
-                    minHeight: 6,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _allChecked ? "ALL ITEMS PICKED" : "READY FOR PICKING",
-                  style: TextStyle(
-                    color: _allChecked ? Colors.green : Colors.grey,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: widget.order.items.length,
-              itemBuilder: (context, index) {
-                final item = widget.order.items[index];
-                final bool isChecked = _checkedIndices.contains(index);
-                final Color activeColor = _allChecked
-                    ? Colors.green
-                    : const Color(0xFFF58220);
-
-                return GestureDetector(
-                  onTap: () {
-                    if (!isChecked) {
-                      _openScannerToCheckoff(index, item.productId);
-                    } else {
-                      setState(() {
-                        _checkedIndices.remove(index);
-                      });
-                    }
-                  },
-                  onLongPress: () {
-                    setState(() {
-                      if (isChecked) {
-                        _checkedIndices.remove(index);
-                      } else {
-                        _checkedIndices.add(index);
-                      }
-                    });
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    curve: Curves.easeInOut,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: isChecked ? const Color(0xFFE8F5E9) : Colors.white,
-                      border: Border.all(
-                        color: isChecked
-                            ? const Color(0xFFC8E6C9)
-                            : Colors.grey.shade300,
-                      ),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeInOut,
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            color: isChecked ? activeColor : Colors.white,
-                            border: Border.all(
-                              color: isChecked
-                                  ? activeColor
-                                  : Colors.grey.shade400,
-                              width: 2,
-                            ),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: isChecked
-                              ? const Icon(
-                                  Icons.check,
-                                  size: 16,
-                                  color: Colors.white,
-                                )
-                              : null,
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              AnimatedDefaultTextStyle(
-                                duration: const Duration(milliseconds: 200),
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                  color: Colors.black87,
-                                  decoration: isChecked
-                                      ? TextDecoration.lineThrough
-                                      : TextDecoration.none,
-                                ),
-                                child: Text(item.productName),
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  AnimatedContainer(
-                                    duration: const Duration(milliseconds: 200),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: isChecked
-                                          ? activeColor
-                                          : const Color(0xFFFBEADB),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      'QTY: ${item.quantity.truncateToDouble() == item.quantity ? item.quantity.toInt() : item.quantity.toStringAsFixed(2)}',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        color: isChecked
-                                            ? Colors.white
-                                            : const Color(0xFF9E651D),
-                                      ),
-                                    ),
-                                  ),
-                                  // Map/Location completely removed from here
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(20),
-            color: _allChecked ? Colors.green.shade50 : const Color(0xFFF8E9DE),
-            child: SizedBox(
-              width: double.infinity,
-              height: 55,
-              child: ElevatedButton.icon(
-                onPressed: _allChecked ? _markPrepared : null,
-                icon: const Icon(Icons.check_circle_outline),
-                label: const Text(
-                  "NOTIFY CASHIER (PREPARED)",
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1,
-                  ),
-                ),
-                style:
-                    ElevatedButton.styleFrom(
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ).copyWith(
-                      backgroundColor: WidgetStateProperty.resolveWith((
-                        states,
-                      ) {
-                        if (states.contains(WidgetState.disabled))
-                          return const Color(0xFFDAC7B8);
-                        return Colors.green;
-                      }),
-                      foregroundColor: WidgetStateProperty.resolveWith((
-                        states,
-                      ) {
-                        if (states.contains(WidgetState.disabled))
-                          return Colors.white70;
-                        return Colors.white;
-                      }),
-                    ),
-              ),
-            ),
-          ),
-        ],
+      body: OrderChecklistView(
+        order: order,
+        controller: controller,
+        finishLabel: "NOTIFY CASHIER (PREPARED)",
+        finishIcon: LucideIcons.checkCircle2,
+        onFinish: () => _markPrepared(context),
       ),
     );
   }
 }
 
-// ============================================================================
-// PICK CONFIRMATION SHEET
-// ============================================================================
-class PickConfirmationSheet extends StatelessWidget {
-  final InventoryItem item;
-  final double targetQuantity;
-  final VoidCallback onConfirm;
-
-  const PickConfirmationSheet({
-    super.key,
-    required this.item,
-    required this.targetQuantity,
-    required this.onConfirm,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final String displayQty =
-        targetQuantity.truncateToDouble() == targetQuantity
-        ? targetQuantity.toInt().toString()
-        : targetQuantity.toStringAsFixed(2);
-
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.check_circle, color: Colors.green, size: 64),
-            const SizedBox(height: 12),
-            const Text(
-              "Item Verified!",
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: Colors.green,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 70,
-                    height: 70,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                      image: DecorationImage(
-                        image: NetworkImage(item.imageUrl),
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "SKU-${item.sku}",
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey.shade600,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          item.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: Colors.black87,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green.shade200),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.shopping_basket,
-                    color: Colors.green.shade700,
-                    size: 28,
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: RichText(
-                      text: TextSpan(
-                        style: TextStyle(
-                          color: Colors.green.shade900,
-                          fontSize: 14,
-                          height: 1.4,
-                        ),
-                        children: [
-                          const TextSpan(text: "Please pick exactly "),
-                          TextSpan(
-                            text: "$displayQty ${item.unit}",
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          // Location string logic completely removed
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 55,
-              child: ElevatedButton.icon(
-                onPressed: onConfirm,
-                icon: const Icon(Icons.check_circle_outline),
-                label: const Text(
-                  "Confirm Pick",
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

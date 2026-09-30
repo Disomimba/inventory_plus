@@ -737,31 +737,31 @@ class InventoryController {
     }
   }
 
-  Future<void> createCustomerOrder(
+  // CHANGE 1: Update the signature to return Future<CustomerOrder?>
+  Future<CustomerOrder?> createCustomerOrder(
     List<CustomerOrderItem> items, {
     required double totalAmount,
     required double discountAmount,
     String? paymentMode,
     double? cashGiven,
     double? changeAmount,
+    bool soloHandled = false,  
   }) async {
     final locId = activeLocationId;
-
-    if (locId == null) {
-      return;
-    }
+    if (locId == null) return null; // CHANGE 2: return null
 
     try {
-      await supabase.from('orders').insert({
+      final response = await supabase.from('orders').insert({
         'location_id': locId,
         'status': 'pending',
         'total_amount': totalAmount,
         'discount_amount': discountAmount,
-        'payment_mode': paymentMode ?? 'Cash', // Save the payment mode
+        'payment_mode': paymentMode ?? 'Cash',
         'cash_given': cashGiven,
         'change_amount': changeAmount,
         'items': items.map((i) => i.toJson()).toList(),
         'created_by': currentUserNumericId,
+        'status': soloHandled ? 'solo_picking' : 'pending', 
       }).select();
 
       for (var orderItem in items) {
@@ -775,8 +775,53 @@ class InventoryController {
           await updateItem(updatedItem);
         }
       }
-    } catch (e) {}
+
+      // CHANGE 3: Return the created order object
+      if (response.isNotEmpty) {
+        return CustomerOrder.fromJson(response.first);
+      }
+      return null;
+    } catch (e) {
+      rethrow;
+    }
   }
+
+  Future<void> cancelOrder(CustomerOrder order) async {
+    final row = await supabase
+        .from('orders')
+        .select('status')
+        .eq('id', order.id)
+        .single();
+    final status = row['status'];
+    if (status == 'completed' || status == 'cancelled') {
+      throw Exception('Order is already $status.');
+    }
+
+    await supabase
+        .from('orders')
+        .update({'status': 'cancelled'})
+        .eq('id', order.id);
+
+    for (final oi in order.items) {
+      final index = _items.indexWhere((i) => i.id == oi.productId);
+      if (index == -1) continue;
+      final restored = _items[index].copyWith(
+        quantity: _items[index].quantity + oi.quantity,
+      );
+      await supabase
+          .from('products')
+          .update({'product_quantity': restored.quantity})
+          .eq('id', restored.id);
+      _items[index] = restored;
+      await _logTransaction(
+        productId: restored.id,
+        type: 'order_cancelled',
+        quantityChange: oi.quantity,
+        newQuantity: restored.quantity,
+      );
+    }
+  }
+
 Stream<List<CustomerOrder>> streamOrders() {
     final locId = activeLocationId;
     if (locId == null) return Stream.value([]);
@@ -798,7 +843,12 @@ Stream<List<CustomerOrder>> streamOrders() {
       if (newStatus == 'prepared') {
         updateData['prepared_by'] = currentUserNumericId;
       }
-      await supabase.from('orders').update(updateData).eq('id', orderId);
+      await supabase
+          .from('orders')
+          .update(updateData)
+          .eq('id', orderId)
+          .neq('status', 'cancelled')
+          .neq('status', 'completed');
     } catch (e) {}
   }
 
@@ -820,7 +870,9 @@ Stream<List<CustomerOrder>> streamOrders() {
           .select('status')
           .eq('id', order.id)
           .single();
-      if (checkOrder['status'] == 'completed') return;
+       final s = checkOrder['status'];
+      if (s == 'completed') return;
+      if (s == 'cancelled') throw Exception('This order was cancelled.');
 
       // Prepare the data payload to update
       final Map<String, dynamic> updateData = {

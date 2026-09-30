@@ -64,7 +64,10 @@ class _ToastViewState extends State<_ToastView> {
     _hideTimer = Timer(const Duration(milliseconds: 2500), () {
       if (mounted) setState(() => _visible = false);
     });
-    _removeTimer = Timer(const Duration(milliseconds: 2800), widget.onDismissed);
+    _removeTimer = Timer(
+      const Duration(milliseconds: 2800),
+      widget.onDismissed,
+    );
   }
 
   @override
