@@ -6,6 +6,9 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'reports/sales_report_generator.dart'; 
+import '../services/export_period.dart';
+import '../services/export_reminder_service.dart'; // add
+
 
 String _fmtQty(double v) =>
     v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
@@ -13,17 +16,19 @@ String _fmtQty(double v) =>
 class TransactionHistoryPage extends StatefulWidget {
   final InventoryController controller;
   final String initialTab;
-
-  /// Called when the user taps "Complete Order Now" on a pending order.
-  /// The parent screen should switch to the   Order Queue and open that order.
+  final bool exportDue;
+  final VoidCallback? onExported;
   final void Function(String orderId)? onCompleteOrder;
 
   const TransactionHistoryPage({
     super.key,
     required this.controller,
     this.initialTab = 'Sales History',
+    this.exportDue = false,
+    this.onExported,
     this.onCompleteOrder,
   });
+  
 
   @override
   State<TransactionHistoryPage> createState() => _TransactionHistoryPageState();
@@ -50,6 +55,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     _activeTab = widget.initialTab;
     _load();
   }
+
 @override
   void didUpdateWidget(TransactionHistoryPage oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -266,18 +272,47 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                   children: [
                     // Only show Export button on the Sales History tab
                     if (_activeTab == 'Sales History') ...[
-                      OutlinedButton.icon(
-                        onPressed: () => _showSalesReportDialog(context),
-                        icon: const Icon(LucideIcons.download, size: 16),
-                        label: const Text("Export Sales", style: TextStyle(fontWeight: FontWeight.bold)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.black87,
-                          side: BorderSide(color: Colors.grey.shade300),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () => _showSalesReportDialog(context),
+                            icon: const Icon(LucideIcons.download, size: 16),
+                            label: const Text(
+                              "Export Sales",
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.black87,
+                              side: BorderSide(
+                                color: widget.exportDue
+                                    ? Colors.red
+                                    : Colors.grey.shade300,
+                                width: widget.exportDue ? 1.5 : 1,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
                           ),
-                        ),
+                          if (widget.exportDue)
+                            Positioned(
+                              top: -4,
+                              right: -4,
+                              child: Container(
+                                width: 10,
+                                height: 10,
+                                decoration: const BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                       const SizedBox(width: 12),
                     ],
@@ -340,12 +375,13 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                 }
 
                 // Activity Log Stats
-                int stockInTotal = 0;
-                int stockOutTotal = 0;
+                // Activity Log Stats
+                double stockInTotal = 0;
+                double stockOutTotal = 0;
                 for (var tx in _activityLog) {
                   num qty = tx['quantity_change'] ?? 0;
-                  if (qty > 0) stockInTotal += qty.toInt();
-                  if (qty < 0) stockOutTotal += qty.toInt().abs();
+                  if (qty > 0) stockInTotal += qty.toDouble();
+                  if (qty < 0) stockOutTotal += qty.toDouble().abs();
                 }
 
                 return Column(
@@ -364,9 +400,17 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                           ] else ...[
                             _buildStatCard("TOTAL CHANGES", "${_activityLog.length}", Colors.black87),
                             const SizedBox(width: 16),
-                            _buildStatCard("STOCK IN", "+$stockInTotal", Colors.green),
+                            _buildStatCard(
+                              "STOCK IN",
+                              "+${_fmtQty(stockInTotal)}",
+                              Colors.green,
+                            ),
                             const SizedBox(width: 16),
-                            _buildStatCard("STOCK OUT", "-$stockOutTotal", Colors.red),
+                            _buildStatCard(
+                              "STOCK OUT",
+                              "-${_fmtQty(stockOutTotal)}",
+                              Colors.red,
+                            ),
                           ]
                         ],
                       ),
@@ -790,8 +834,7 @@ Widget _buildSalesHistoryList(List<_OrderGroup> filteredOrders) {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          "${isPositive ? '+' : ''}${tx['quantity_change']}",
-                          style: TextStyle(
+                          "${isPositive ? '+' : ''}${_fmtQty((tx['quantity_change'] as num).toDouble())}",  style: TextStyle(
                             fontWeight: FontWeight.w900,
                             fontSize: 16,
                             color: typeColor,
@@ -799,7 +842,7 @@ Widget _buildSalesHistoryList(List<_OrderGroup> filteredOrders) {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          "New qty: ${tx['new_quantity']}",
+                          "New qty: ${_fmtQty((tx['new_quantity'] as num).toDouble())}",
                           style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
                         ),
                       ],
@@ -947,7 +990,7 @@ void _showSalesReportDialog(BuildContext context) {
 
   Future<void> _generateAndPrintSalesReport(
     BuildContext context,
-    String period,
+    String periodLabel,
   ) async {
     showDialog(
       context: context,
@@ -957,23 +1000,19 @@ void _showSalesReportDialog(BuildContext context) {
     );
 
     try {
-      DateTime now = DateTime.now();
-      DateTime cutoffDate;
-      if (period == 'Daily') {
-        cutoffDate = DateTime(now.year, now.month, now.day);
-      } else if (period == 'Weekly') {
-        cutoffDate = now.subtract(const Duration(days: 7));
-      } else {
-        cutoffDate = now.subtract(const Duration(days: 30));
-      }
+      final type = periodLabel == 'Daily'
+          ? ExportPeriodType.daily
+          : periodLabel == 'Weekly'
+          ? ExportPeriodType.weekly
+          : ExportPeriodType.monthly;
+      final exportPeriod = ExportPeriod.current(type);
 
-      // Grab exactly the orders shown in the UI
       final allGroups = await _groupedFuture;
-
-      // Filter for COMPLETED sales within the timeframe
-      final periodSales = allGroups.where((g) {
-        return g.status == 'completed' && g.eventAt.isAfter(cutoffDate);
-      }).toList();
+      final periodSales = allGroups
+          .where(
+            (g) => g.status == 'completed' && exportPeriod.contains(g.eventAt),
+          )
+          .toList();
 
       if (periodSales.isEmpty) {
         if (context.mounted) {
@@ -998,27 +1037,44 @@ void _showSalesReportDialog(BuildContext context) {
           .toList();
 
       final bytes = await SalesReportGenerator.generate(
-        period: period,
-        periodStart: cutoffDate,
-        periodEnd: now,
-        generatedAt: now,
+        period: periodLabel,
+        periodStart: exportPeriod.start,
+        periodEnd: exportPeriod.displayEnd,
+        generatedAt: DateTime.now(),
         generatedBy: widget.controller.currentUserName ?? 'Admin',
         sales: entries,
       );
 
-      if (context.mounted) Navigator.pop(context); // close loading dialog
+      if (context.mounted) Navigator.pop(context);
 
       await Printing.sharePdf(
         bytes: bytes,
         filename:
-            'Sales_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+            'Sales_Report_${periodLabel}_${DateTime.now().millisecondsSinceEpoch}.pdf',
       );
+
+      await _markExported(type);
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
         AppToast.error(context, 'Error generating PDF: $e');
       }
     }
+  }
+
+  Future<void> _markExported(ExportPeriodType type) async {
+    final locId = widget.controller.activeLocationId;
+    if (locId == null) return;
+    final service = ExportReminderService(
+      supabase: widget.controller.supabase,
+      locationId: locId,
+    );
+    await service.logExport(
+      reportType: 'sales',
+      period: ExportPeriod.current(type),
+      exportedBy: widget.controller.currentUserNumericId,
+    );
+    widget.onExported?.call();
   }
 
   Widget _buildEmptyState() {

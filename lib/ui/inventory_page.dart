@@ -8,15 +8,24 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:inventory_plus/ui/widgets/app_toast.dart';
+import '../services/export_period.dart'; 
+import '../services/export_reminder_service.dart';  
+
+String _fmtQty(double v) =>
+    v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
 
 class InventoryPage extends StatefulWidget {
   final InventoryController controller;
   final Function(InventoryItem) onSelectItem;
+    final bool exportDue;
+  final VoidCallback? onExported;
 
   const InventoryPage({
     super.key,
     required this.controller,
     required this.onSelectItem,
+    this.exportDue = false,
+    this.onExported,
   });
 
   @override
@@ -109,11 +118,51 @@ class _InventoryPageState extends State<InventoryPage> {
                     if (widget.controller.isAdmin)
                       Row(
                         children: [
-                          _buildHeaderButton(
-                            icon: LucideIcons.download,
-                            label: "Export Report",
-
-                            onPressed: () => _showReportDialog(context),
+                          Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: () =>
+                                    _showReportDialog(context),
+                                icon: const Icon(
+                                  LucideIcons.download,
+                                  size: 16,
+                                ),
+                                label: const Text(
+                                  "Export Inventory Report",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.black87,
+                                  side: BorderSide(
+                                    color: widget.exportDue
+                                        ? Colors.red
+                                        : Colors.grey.shade300,
+                                    width: widget.exportDue ? 1.5 : 1,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                              if (widget.exportDue)
+                                Positioned(
+                                  top: -4,
+                                  right: -4,
+                                  child: Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                           const SizedBox(width: 8),
                           _buildHeaderButton(
@@ -492,30 +541,28 @@ class _InventoryPageState extends State<InventoryPage> {
     );
 
     try {
-      DateTime now = DateTime.now();
-      DateTime cutoffDate;
-      if (period == 'Daily') {
-        cutoffDate = DateTime(now.year, now.month, now.day);
-      } else if (period == 'Weekly') {
-        cutoffDate = now.subtract(const Duration(days: 7));
-      } else {
-        cutoffDate = now.subtract(const Duration(days: 30));
-      }
+      final now = DateTime.now();
+      final type = period == 'Daily'
+          ? ExportPeriodType.daily
+          : period == 'Weekly'
+          ? ExportPeriodType.weekly
+          : ExportPeriodType.monthly;
+      final exportPeriod = ExportPeriod.current(type);
 
       final allTransactions = await widget.controller
           .fetchAllTransactionHistory();
       final periodTransactions = allTransactions.where((tx) {
         final txDate = DateTime.parse(tx['created_at']).toLocal();
-        return txDate.isAfter(cutoffDate);
+        return exportPeriod.contains(txDate);
       }).toList();
 
-      Map<String, int> issuedDetails = {};
-      Map<String, int> receivedDetails = {};
+      Map<String, double> issuedDetails = {};
+      Map<String, double> receivedDetails = {};
 
       for (var tx in periodTransactions) {
         final productId = tx['product_id']?.toString();
-        if (productId == null) continue; // e.g. 'delete' entries
-        final qty = (tx['quantity_change'] as num).toInt();
+        if (productId == null) continue;
+        final qty = (tx['quantity_change'] as num).toDouble();
 
         if (tx['transaction_type'] == 'checkout') {
           issuedDetails[productId] =
@@ -562,9 +609,9 @@ class _InventoryPageState extends State<InventoryPage> {
       );
 
       for (var item in items) {
-        final issued = issuedDetails[item.id] ?? 0;
-        final received = receivedDetails[item.id] ?? 0;
-        final num endingQty = item.quantity;
+        final issued = issuedDetails[item.id] ?? 0.0;
+        final received = receivedDetails[item.id] ?? 0.0;
+        final double endingQty = item.quantity;
         final beginningQty = endingQty - received + issued;
         final totalValue = endingQty * item.price;
 
@@ -576,11 +623,11 @@ class _InventoryPageState extends State<InventoryPage> {
             children: [
               item.sku,
               item.name,
-              '$beginningQty ${item.unit}', // Added unit
-              '$received',
-              '$issued',
-              '$endingQty ${item.unit}',    // Added unit
-              _formatCurrency(item.price),  // Added commas
+              '${_fmtQty(beginningQty)} ${item.unit}',
+              _fmtQty(received),
+              _fmtQty(issued),
+              '${_fmtQty(endingQty)} ${item.unit}',
+              _formatCurrency(item.price),
               _formatCurrency(totalValue),  // Added commas
             ]
                     .map(
@@ -699,6 +746,8 @@ class _InventoryPageState extends State<InventoryPage> {
       );
 
       _showToast("Report generated");
+
+      await _markExported(type);
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
@@ -812,4 +861,20 @@ class _InventoryPageState extends State<InventoryPage> {
   String mathFunc(Match match) => '${match[1]},';
   return 'P${value.toStringAsFixed(2).replaceAllMapped(reg, mathFunc)}';
 }
+
+Future<void> _markExported(ExportPeriodType type) async {
+    final locId = widget.controller.activeLocationId;
+    if (locId == null) return;
+    final service = ExportReminderService(
+      supabase: widget.controller.supabase,
+      locationId: locId,
+    );
+    await service.logExport(
+      reportType: 'inventory',
+      period: ExportPeriod.current(type),
+      exportedBy: widget.controller.currentUserNumericId,
+    );
+    widget.onExported
+        ?.call(); // clears both the button dot and sidebar dot instantly
+  }
 }

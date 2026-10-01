@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -14,6 +15,10 @@ import 'pos_cart_page.dart';
 import 'order_queue_page.dart';
 import 'transaction_history_page.dart';
 import 'system_settings_page.dart';
+
+import '../services/export_reminder_service.dart';
+import '../services/export_period.dart';
+import '../services/debug_clock.dart';
 
 class MainScreen extends StatefulWidget {
   final InventoryController controller;
@@ -33,6 +38,9 @@ class _MainScreenState extends State<MainScreen> {
   static const Color _primaryOrange = Color(0xFFEA580C);
   static const Color _darkSidebarBg = Color(0xFF0F172A);
   static const Color _mainBg = Color(0xFFF1F5F9);
+
+  bool _inventoryExportDue = false;
+  bool _salesExportDue = false;
 
   // --- REUSABLE PAGE FUNCTIONS ---
   void _handleSelectItem(InventoryItem item) {
@@ -82,6 +90,44 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
+  Future<void> _debugClearExportLog() async {
+    final locId = widget.controller.activeLocationId;
+    if (locId == null) return;
+    final service = ExportReminderService(
+      supabase: widget.controller.supabase,
+      locationId: locId,
+    );
+    await service.clearExportLog();
+    await _checkExportReminders();
+  }
+
+    @override
+  void initState() {
+    super.initState();
+    _checkExportReminders();
+  }
+
+  Future<void> _checkExportReminders() async {
+    final locId = widget.controller.activeLocationId;
+    if (locId == null) return;
+
+    final service = ExportReminderService(
+      supabase: widget.controller.supabase,
+      locationId: locId,
+    );
+
+    final results = await Future.wait([
+      service.dueReminders('inventory'),
+      service.dueReminders('sales'),
+    ]);
+
+    if (!mounted) return;
+    setState(() {
+      _inventoryExportDue = results[0].isNotEmpty;
+      _salesExportDue = results[1].isNotEmpty;
+    });
+  }
+
   Future<void> _handleUpdateItem(InventoryItem item) async {
     await widget.controller.updateItem(item);
     if (mounted) {
@@ -99,6 +145,121 @@ class _MainScreenState extends State<MainScreen> {
       _selectedItem = null;
     });
   }
+
+  Widget _debugClockButton() {
+  return FloatingActionButton.small(
+    backgroundColor: DebugClock.isOverridden ? Colors.red : Colors.grey,
+    onPressed: _showDebugClockDialog,
+    child: const Icon(Icons.schedule, color: Colors.white),
+  );
+}
+
+void _showDebugClockDialog() {
+  showDialog(
+    context: context,
+    builder: (dialogContext) {
+      DateTime picked = DebugClock.now();
+      return StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('Debug clock'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Current fake "now": ${picked.toString()}'),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _quickSet('Daily 5:01 PM', () {
+                    final n = DateTime.now();
+                    return DateTime(n.year, n.month, n.day, 17, 1);
+                  }, setD, (d) => picked = d),
+                  _quickSet('Sunday 5:01 PM (week due)', () {
+                    final n = DateTime.now();
+                    final sunday = n.add(Duration(days: 7 - n.weekday));
+                    return DateTime(sunday.year, sunday.month, sunday.day, 17, 1);
+                  }, setD, (d) => picked = d),
+                  _quickSet('Last day of month, 5:01 PM', () {
+                    final n = DateTime.now();
+                    final lastDay = DateTime(n.year, n.month + 1, 0);
+                    return DateTime(lastDay.year, lastDay.month, lastDay.day, 17, 1);
+                  }, setD, (d) => picked = d),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () async {
+                  final date = await showDatePicker(
+                    context: ctx,
+                    initialDate: picked,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
+                  if (date == null) return;
+                  final time = await showTimePicker(
+                    context: ctx,
+                    initialTime: TimeOfDay.fromDateTime(picked),
+                  );
+                  if (time == null) return;
+                  setD(() {
+                    picked = DateTime(
+                      date.year, date.month, date.day, time.hour, time.minute,
+                    );
+                  });
+                },
+                child: const Text('Pick custom date/time'),
+              ),
+            ],
+          ),
+                    actions: [
+              TextButton(
+                onPressed: () async {
+                  await _debugClearExportLog();
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                },
+                child: const Text(
+                  'Clear export log',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  DebugClock.set(null);
+                  Navigator.pop(dialogContext);
+                  setState(() {});
+                  _checkExportReminders();
+                },
+                child: const Text('Reset to real time'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  DebugClock.set(picked);
+                  Navigator.pop(dialogContext);
+                  setState(() {});
+                  _checkExportReminders();
+                },
+                child: const Text('Apply'),
+              ),
+            ],
+        ),
+      );
+    },
+  );
+}
+
+Widget _quickSet(
+  String label,
+  DateTime Function() compute,
+  void Function(void Function()) setD,
+  void Function(DateTime) assign,
+) {
+  return ActionChip(
+    label: Text(label, style: const TextStyle(fontSize: 12)),
+    onPressed: () => setD(() => assign(compute())),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -120,6 +281,8 @@ class _MainScreenState extends State<MainScreen> {
         onDelete: _handleDeleteItem,
       );
     }
+
+    
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -183,7 +346,9 @@ class _MainScreenState extends State<MainScreen> {
           InventoryPage(
             controller: widget.controller,
             onSelectItem: _handleSelectItem,
-          )
+            exportDue: _inventoryExportDue,
+            onExported: () => setState(() => _inventoryExportDue = false),
+          ),
         );
 
         if (isAdmin) {
@@ -191,6 +356,8 @@ class _MainScreenState extends State<MainScreen> {
             TransactionHistoryPage(
               controller: widget.controller,
               initialTab: _txTargetTab,
+              exportDue: _salesExportDue,
+              onExported: () => setState(() => _salesExportDue = false),
               onCompleteOrder: (orderId) {
                 setState(() {
                   _targetOrderId = orderId;
@@ -199,7 +366,7 @@ class _MainScreenState extends State<MainScreen> {
               },
             ),
           );
-        } 
+        }
 
         if (isAdmin) {
           pages.add(SystemSettingsPage(controller: widget.controller));
@@ -274,6 +441,7 @@ class _MainScreenState extends State<MainScreen> {
                                 Icons.inventory_2_outlined,
                                 'Inventory',
                                 activeIcon: Icons.inventory_2,
+                                showDot: _inventoryExportDue,
                               ),
                               if (isAdmin)
                                 _buildSidebarItem(
@@ -281,6 +449,7 @@ class _MainScreenState extends State<MainScreen> {
                                   Icons.history_outlined,
                                   'Transactions',
                                   activeIcon: Icons.history,
+                                  showDot: _salesExportDue,
                                 ),
                               if (isAdmin)
                                 _buildSidebarItem(
@@ -300,10 +469,20 @@ class _MainScreenState extends State<MainScreen> {
                 Expanded(
                   child: IndexedStack(index: _currentIndex, children: pages),
                 ),
+                
+                
               ],
+              
             ),
+            
+            
+            floatingActionButton: kReleaseMode ? null : _debugClockButton(),
+
+            
           );
+
         }
+        
 
         // ==========================================
         // MOBILE LAYOUT (Bottom Navigation)
@@ -338,6 +517,7 @@ class _MainScreenState extends State<MainScreen> {
                 setState(() {
                   _currentIndex = index;
                 });
+                _checkExportReminders();
               },
               destinations: [
                 if (isAdmin)
@@ -358,15 +538,31 @@ class _MainScreenState extends State<MainScreen> {
                     selectedIcon: Icon(Icons.receipt_long, color: Colors.white),
                     label: 'Queue',
                   ),
-                const NavigationDestination(
-                  icon: Icon(Icons.assignment_outlined, color: Colors.grey),
-                  selectedIcon: Icon(Icons.assignment, color: Colors.white),
+                NavigationDestination(
+                  icon: _navIcon(
+                    Icons.assignment_outlined,
+                    Colors.grey,
+                    _inventoryExportDue,
+                  ),
+                  selectedIcon: _navIcon(
+                    Icons.assignment,
+                    Colors.white,
+                    _inventoryExportDue,
+                  ),
                   label: 'Inventory',
                 ),
                 if (isAdmin)
-                  const NavigationDestination(
-                    icon: Icon(Icons.history_outlined, color: Colors.grey),
-                    selectedIcon: Icon(Icons.history, color: Colors.white),
+                  NavigationDestination(
+                    icon: _navIcon(
+                      Icons.history_outlined,
+                      Colors.grey,
+                      _salesExportDue,
+                    ),
+                    selectedIcon: _navIcon(
+                      Icons.history,
+                      Colors.white,
+                      _salesExportDue,
+                    ),
                     label: 'History',
                   ),
                 if (isAdmin)
@@ -383,17 +579,44 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  Widget _navIcon(IconData icon, Color color, bool showDot) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Icon(icon, color: color),
+        if (showDot)
+          Positioned(
+            top: -2,
+            right: -2,
+            child: Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+                border: Border.all(color: _darkSidebarBg, width: 1.5),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildSidebarItem(
     int index,
     IconData icon,
     String label, {
     IconData? activeIcon,
+    bool showDot = false,
   }) {
     final isSelected = _currentIndex == index;
     final currentColor = isSelected ? _primaryOrange : const Color(0xFF94A3B8);
 
     return InkWell(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () {
+        setState(() => _currentIndex = index);
+        _checkExportReminders();
+      },
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 30),
@@ -416,6 +639,17 @@ class _MainScreenState extends State<MainScreen> {
                 fontSize: 16,
               ),
             ),
+            if (showDot) ...[
+              const SizedBox(width: 6),
+              Container(
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
           ],
         ),
       ),

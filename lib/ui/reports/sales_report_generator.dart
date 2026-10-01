@@ -167,7 +167,7 @@ class SalesReportGenerator {
           ),
           pw.SizedBox(height: 4),
           pw.Text(
-            '$period Report  •  ${_formatRange(periodStart, periodEnd)}',
+            '$period Report:  ${_formatRange(periodStart, periodEnd)}',
             style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700),
           ),
           pw.SizedBox(height: 12),
@@ -184,7 +184,7 @@ class SalesReportGenerator {
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
             pw.Text(
-              '$businessName — Sales Summary Report (continued)',
+              '$businessName - Sales Summary Report (continued)',
               style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
             ),
             pw.Text(
@@ -478,7 +478,7 @@ class SalesReportGenerator {
 
   static String _formatRange(DateTime start, DateTime end) {
     if (_isSameDay(start, end)) return _formatDate(start);
-    return '${_formatDate(start)} – ${_formatDate(end)}';
+    return '${_formatDate(start)} - ${_formatDate(end)}';
   }
 
   static bool _isSameDay(DateTime a, DateTime b) =>
