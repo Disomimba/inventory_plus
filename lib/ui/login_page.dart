@@ -4,6 +4,7 @@ import 'dart:math';
 import '../login/auth_service.dart';
 import '../logic/inventory_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:inventory_plus/ui/widgets/app_toast.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, required this.controller});
@@ -67,9 +68,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
-    );
+    if (!mounted) return;
+    AppToast.error(context, message);
   }
 
   void _showForgotPasswordModal() {
@@ -414,21 +414,16 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
 
         await _authService.resetPasswordForUser(_email!, input);
 
-        if (mounted) {
+                if (mounted) {
+          // Grab the overlay first: the modal is about to close.
+          final overlay = Overlay.of(context, rootOverlay: true);
           Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Password updated successfully!"),
-              backgroundColor: Colors.green,
-            ),
-          );
+          AppToast.showOn(overlay, 'Password updated successfully!');
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString()), backgroundColor: Colors.redAccent),
-        );
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);

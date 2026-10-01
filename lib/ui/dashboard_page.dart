@@ -4,7 +4,6 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../logic/inventory_controller.dart';
 import '../data/inventory.dart';
 import 'widgets/app_dialog.dart';
-import 'transaction_history_page.dart';
 
 class DashboardPage extends StatefulWidget {
   final InventoryController controller;

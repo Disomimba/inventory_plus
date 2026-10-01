@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:inventory_plus/ui/widgets/app_toast.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../logic/inventory_controller.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'reports/sales_report_generator.dart'; 
 import '../services/export_period.dart';
 import '../services/export_reminder_service.dart'; // add
+import 'reports/report_range.dart';
+import 'reports/report_period_dialog.dart';
+
+
 
 
 String _fmtQty(double v) =>
@@ -276,7 +278,12 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                         clipBehavior: Clip.none,
                         children: [
                           OutlinedButton.icon(
-                            onPressed: () => _showSalesReportDialog(context),
+                            onPressed: () => showReportPeriodDialog(
+                              context,
+                              title: 'Generate Sales Report',
+                              onGenerate: (range) =>
+                                  _generateAndPrintSalesReport(context, range),
+                            ),
                             icon: const Icon(LucideIcons.download, size: 16),
                             label: const Text(
                               "Export Sales",
@@ -856,141 +863,10 @@ Widget _buildSalesHistoryList(List<_OrderGroup> filteredOrders) {
       },
     );
   }
-void _showSalesReportDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        String selectedPeriod = 'Daily';
-        return StatefulBuilder(
-          builder: (stateContext, setState) {
-            return Dialog(
-              backgroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Container(
-                width: 450,
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          "Generate Sales Report",
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF0F172A),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(LucideIcons.x, color: Colors.grey),
-                          onPressed: () => Navigator.pop(dialogContext),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'Select the report period:',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: selectedPeriod,
-                          isExpanded: true,
-                          icon: const Icon(LucideIcons.chevronDown, size: 18),
-                          items: ['Daily', 'Weekly', 'Monthly'].map((
-                            String value,
-                          ) {
-                            return DropdownMenuItem<String>(
-                              value: value,
-                              child: Text(
-                                value,
-                                style: const TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                            );
-                          }).toList(),
-                          onChanged: (newValue) {
-                            if (newValue != null) {
-                              setState(() => selectedPeriod = newValue);
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.pop(stateContext),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.black87,
-                            side: BorderSide(color: Colors.grey.shade300),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                              horizontal: 24,
-                            ),
-                          ),
-                          child: const Text("Cancel"),
-                        ),
-                        const SizedBox(width: 12),
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.pop(stateContext);
-                            _generateAndPrintSalesReport(context, selectedPeriod);
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                              horizontal: 32,
-                            ),
-                            elevation: 0,
-                          ),
-                          child: const Text(
-                            "Generate PDF",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 
   Future<void> _generateAndPrintSalesReport(
     BuildContext context,
-    String periodLabel,
+    ReportRange range,
   ) async {
     showDialog(
       context: context,
@@ -1000,18 +876,9 @@ void _showSalesReportDialog(BuildContext context) {
     );
 
     try {
-      final type = periodLabel == 'Daily'
-          ? ExportPeriodType.daily
-          : periodLabel == 'Weekly'
-          ? ExportPeriodType.weekly
-          : ExportPeriodType.monthly;
-      final exportPeriod = ExportPeriod.current(type);
-
       final allGroups = await _groupedFuture;
       final periodSales = allGroups
-          .where(
-            (g) => g.status == 'completed' && exportPeriod.contains(g.eventAt),
-          )
+          .where((g) => g.status == 'completed' && range.contains(g.eventAt))
           .toList();
 
       if (periodSales.isEmpty) {
@@ -1036,11 +903,12 @@ void _showSalesReportDialog(BuildContext context) {
           )
           .toList();
 
+      final now = DateTime.now();
       final bytes = await SalesReportGenerator.generate(
-        period: periodLabel,
-        periodStart: exportPeriod.start,
-        periodEnd: exportPeriod.displayEnd,
-        generatedAt: DateTime.now(),
+        period: range.period,
+        periodStart: range.start,
+        periodEnd: range.displayEnd,
+        generatedAt: now,
         generatedBy: widget.controller.currentUserName ?? 'Admin',
         sales: entries,
       );
@@ -1050,10 +918,11 @@ void _showSalesReportDialog(BuildContext context) {
       await Printing.sharePdf(
         bytes: bytes,
         filename:
-            'Sales_Report_${periodLabel}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+            'Sales_Report_${range.period}_${range.fileTag}_${now.millisecondsSinceEpoch}.pdf',
       );
 
-      await _markExported(type);
+      // Only the CURRENT period counts toward the export reminder.
+      if (range.isCurrent) await _markExported(range.type);
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);

@@ -10,6 +10,9 @@ import 'package:printing/printing.dart';
 import 'package:inventory_plus/ui/widgets/app_toast.dart';
 import '../services/export_period.dart'; 
 import '../services/export_reminder_service.dart';  
+import 'reports/inventory_report_generator.dart';
+import 'reports/report_range.dart';
+import 'reports/report_period_dialog.dart';
 
 String _fmtQty(double v) =>
     v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
@@ -122,8 +125,16 @@ class _InventoryPageState extends State<InventoryPage> {
                             clipBehavior: Clip.none,
                             children: [
                               OutlinedButton.icon(
-                                onPressed: () =>
-                                    _showReportDialog(context),
+                                onPressed: () => showReportPeriodDialog(
+                                  context,
+                                  title: 'Generate Inventory Report',
+                                  note: 'Past reports use current unit costs.',
+                                  onGenerate: (range) =>
+                                      _generateAndPrintInventoryReport(
+                                        context,
+                                        range,
+                                      ),
+                                ),
                                 icon: const Icon(
                                   LucideIcons.download,
                                   size: 16,
@@ -382,149 +393,9 @@ class _InventoryPageState extends State<InventoryPage> {
     );
   }
 
-  // --- MOVED LOGIC FROM SETTINGS PAGE ---
-  void _showReportDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        String selectedPeriod = 'Daily';
-        return StatefulBuilder(
-          builder: (stateContext, setState) {
-            return Dialog(
-              backgroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Container(
-                width: 450,
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          "Generate Inventory Report",
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF0F172A),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(LucideIcons.x, color: Colors.grey),
-                          onPressed: () => Navigator.pop(dialogContext),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'Select the report type/period:',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: selectedPeriod,
-                          isExpanded: true,
-                          icon: const Icon(LucideIcons.chevronDown, size: 18),
-                          items: ['Daily', 'Weekly', 'Monthly'].map((
-                            String value,
-                          ) {
-                            return DropdownMenuItem<String>(
-                              value: value,
-                              child: Text(
-                                value,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                          onChanged: (newValue) {
-                            if (newValue != null) {
-                              setState(() {
-                                selectedPeriod = newValue;
-                              });
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.pop(stateContext),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.black87,
-                            side: BorderSide(color: Colors.grey.shade300),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                              horizontal: 24,
-                            ),
-                          ),
-                          child: const Text("Cancel"),
-                        ),
-                        const SizedBox(width: 12),
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.pop(stateContext);
-                            _generateAndPrintInventoryReport(
-                              context,
-                              selectedPeriod,
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                              horizontal: 32,
-                            ),
-                            elevation: 0,
-                          ),
-                          child: const Text(
-                            "Generate PDF",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   Future<void> _generateAndPrintInventoryReport(
     BuildContext context,
-    String period,
+    ReportRange range,
   ) async {
     final items = widget.controller.allItems;
 
@@ -542,27 +413,32 @@ class _InventoryPageState extends State<InventoryPage> {
 
     try {
       final now = DateTime.now();
-      final type = period == 'Daily'
-          ? ExportPeriodType.daily
-          : period == 'Weekly'
-          ? ExportPeriodType.weekly
-          : ExportPeriodType.monthly;
-      final exportPeriod = ExportPeriod.current(type);
 
       final allTransactions = await widget.controller
           .fetchAllTransactionHistory();
-      final periodTransactions = allTransactions.where((tx) {
-        final txDate = DateTime.parse(tx['created_at']).toLocal();
-        return exportPeriod.contains(txDate);
-      }).toList();
 
-      Map<String, double> issuedDetails = {};
-      Map<String, double> receivedDetails = {};
+      final issuedDetails = <String, double>{};
+      final receivedDetails = <String, double>{};
+      final netInPeriod = <String, double>{};
+      final netAfterPeriod = <String, double>{};
 
-      for (var tx in periodTransactions) {
+      for (final tx in allTransactions) {
         final productId = tx['product_id']?.toString();
         if (productId == null) continue;
+
+        final txDate = DateTime.parse(tx['created_at']).toLocal();
         final qty = (tx['quantity_change'] as num).toDouble();
+
+        // Happened AFTER the report period: used to roll today's stock back
+        // to what it was at the end of the period.
+        if (!txDate.isBefore(range.endExclusive)) {
+          netAfterPeriod[productId] = (netAfterPeriod[productId] ?? 0) + qty;
+          continue;
+        }
+
+        if (!range.contains(txDate)) continue;
+
+        netInPeriod[productId] = (netInPeriod[productId] ?? 0) + qty;
 
         if (tx['transaction_type'] == 'checkout') {
           issuedDetails[productId] =
@@ -573,181 +449,46 @@ class _InventoryPageState extends State<InventoryPage> {
         }
       }
 
-      double grandTotalValue = 0;
-      double grandTotalItems = 0.0;
+      final entries = items.map((item) {
+        // Stock at the END of the period = current stock minus everything
+        // that happened after it. For the current period this is just
+        // item.quantity.
+        final ending =
+            item.quantity.toDouble() - (netAfterPeriod[item.id] ?? 0);
+        final beginning = ending - (netInPeriod[item.id] ?? 0);
 
-      final tableRows = <pw.TableRow>[];
-
-      tableRows.add(
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(color: PdfColors.grey300),
-          children:
-              [
-                    'Item Code',
-                    'Item Name',
-                    'Beginning Qty',
-                    'Received',
-                    'Issued',
-                    'Ending Qty',
-                    'Unit Cost',
-                    'Total Value',
-                  ]
-                  .map(
-                    (text) => pw.Padding(
-                      padding: const pw.EdgeInsets.all(6),
-                      child: pw.Text(
-                        text,
-                        style: pw.TextStyle(
-                          fontWeight: pw.FontWeight.bold,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                  )
-                  .toList(),
-        ),
-      );
-
-      for (var item in items) {
-        final issued = issuedDetails[item.id] ?? 0.0;
-        final received = receivedDetails[item.id] ?? 0.0;
-        final double endingQty = item.quantity;
-        final beginningQty = endingQty - received + issued;
-        final totalValue = endingQty * item.price;
-
-        grandTotalValue += totalValue;
-        grandTotalItems += endingQty;
-
-        tableRows.add(
-          pw.TableRow(
-            children: [
-              item.sku,
-              item.name,
-              '${_fmtQty(beginningQty)} ${item.unit}',
-              _fmtQty(received),
-              _fmtQty(issued),
-              '${_fmtQty(endingQty)} ${item.unit}',
-              _formatCurrency(item.price),
-              _formatCurrency(totalValue),  // Added commas
-            ]
-                    .map(
-                      (text) => pw.Padding(
-                        padding: const pw.EdgeInsets.all(6),
-                        child: pw.Text(
-                          text,
-                          style: const pw.TextStyle(fontSize: 10),
-                        ),
-                      ),
-                    )
-                    .toList(),
-          ),
+        return InventoryReportEntry(
+          sku: item.sku,
+          name: item.name,
+          unit: item.unit,
+          beginningQty: beginning,
+          received: receivedDetails[item.id] ?? 0.0,
+          issued: issuedDetails[item.id] ?? 0.0,
+          endingQty: ending,
+          unitCost: item.price,
         );
-      }
+      }).toList();
 
-      final doc = pw.Document();
-
-      doc.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4.landscape,
-          margin: const pw.EdgeInsets.all(32),
-          build: (pw.Context context) {
-            return [
-              pw.Header(
-                level: 0,
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text(
-                          'Inventory Summary Report',
-                          style: pw.TextStyle(
-                            fontSize: 24,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
-                        ),
-                        pw.SizedBox(height: 4),
-                        pw.Text(
-                          'Report Type: $period',
-                          style: const pw.TextStyle(
-                            fontSize: 14,
-                            color: PdfColors.grey700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Text(
-                          'Date Generated: ${now.toString().split(' ')[0]}',
-                          style: const pw.TextStyle(fontSize: 10),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey400),
-                columnWidths: {
-                  0: const pw.FlexColumnWidth(2),
-                  1: const pw.FlexColumnWidth(4),
-                  2: const pw.FlexColumnWidth(1.5),
-                  3: const pw.FlexColumnWidth(1.5),
-                  4: const pw.FlexColumnWidth(1.5),
-                  5: const pw.FlexColumnWidth(1.5),
-                  6: const pw.FlexColumnWidth(1.5),
-                  7: const pw.FlexColumnWidth(2),
-                },
-                children: tableRows,
-              ),
-              pw.SizedBox(height: 20),
-              pw.Divider(),
-              pw.SizedBox(height: 10),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.end,
-                children: [
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      pw.Text(
-                        'Total Items in Stock (Ending): ${grandTotalItems.toStringAsFixed(2)}',
-                        style: pw.TextStyle(
-                          fontWeight: pw.FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                      pw.SizedBox(height: 4),
-                      pw.Text(
-                        'Total Inventory Value: P${grandTotalValue.toStringAsFixed(2)}',
-                        style: pw.TextStyle(
-                          fontWeight: pw.FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ];
-          },
-        ),
+      final bytes = await InventoryReportGenerator.generate(
+        period: range.period,
+        periodStart: range.start,
+        periodEnd: range.displayEnd,
+        generatedAt: now,
+        generatedBy: widget.controller.currentUserName ?? 'Admin',
+        items: entries,
       );
 
-      final bytes = await doc.save();
       if (context.mounted) Navigator.pop(context);
       await Printing.sharePdf(
         bytes: bytes,
         filename:
-            'Inventory_Report_${period}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+            'Inventory_Report_${range.period}_${range.fileTag}_${now.millisecondsSinceEpoch}.pdf',
       );
 
       _showToast("Report generated");
 
-      await _markExported(type);
+      // Only the CURRENT period counts toward the export reminder.
+      if (range.isCurrent) await _markExported(range.type);
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);

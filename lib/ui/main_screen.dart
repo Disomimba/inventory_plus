@@ -19,6 +19,8 @@ import 'system_settings_page.dart';
 import '../services/export_reminder_service.dart';
 import '../services/export_period.dart';
 import '../services/debug_clock.dart';
+import 'widgets/app_dialog.dart';
+import 'widgets/app_toast.dart';
 
 class MainScreen extends StatefulWidget {
   final InventoryController controller;
@@ -656,34 +658,75 @@ Widget _quickSet(
     );
   }
 
-  // Update 1: Replace _handleLogout to show a confirmation dialog.
-  void _handleLogout() async {
+  Future<void> _handleLogout() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Log Out"),
-        content: const Text("Are you sure you want to log out?"),
+      builder: (dialogContext) => AppDialog(
+        icon: LucideIcons.logOut,
+        color: Colors.red,
+        title: 'Log out?',
+        subtitle: widget.controller.currentUserName,
+        child: Text(
+          "You'll need to sign in again to continue using Inventory Plus.",
+          style: TextStyle(
+            fontSize: 14,
+            height: 1.4,
+            color: Colors.grey.shade700,
+          ),
+        ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.black87,
+              side: BorderSide(color: Colors.grey.shade300),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Log Out", style: TextStyle(color: Colors.white)),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Log Out',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
     );
 
-    if (confirm == true) {
+    if (confirm != true || !mounted) return;
+
+    // Grab these BEFORE the async gap / before this screen is replaced, so the
+    // toast can still show on top of the login page.
+    final overlay = Overlay.of(context, rootOverlay: true);
+    final navigator = Navigator.of(context);
+
+    try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/login');
-      }
+    } catch (e) {
+      if (mounted) AppToast.error(context, 'Could not log out: $e');
+      return;
     }
+
+    AppToast.showOn(overlay, 'Logged out successfully');
+    navigator.pushReplacementNamed('/login');
   }
 
   Widget _buildProfileTile() {
